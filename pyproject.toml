@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bmc-snmp-test"
+name = "bmc-snmp-testkit"
 version = "1.0.0"
 description = "MIB-driven automated test framework for BMC SNMP agents"
 requires-python = ">=3.10"

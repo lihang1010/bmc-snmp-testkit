@@ -1,4 +1,4 @@
-# BMC SNMP 自动化测试框架 - 主配置模板
+# bmc-snmp-testkit - 主配置模板
 # 复制为 config/config.yaml 后按需修改；凭据建议通过环境变量注入，勿提交明文。
 # 默认 mode: mock —— 只连接本机模拟 Agent，绝不连接真实 BMC。
 version: 1

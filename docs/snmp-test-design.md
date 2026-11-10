@@ -1,4 +1,4 @@
-# BMC SNMP 自动化测试方案设计
+# bmc-snmp-testkit 方案设计
 
 版本 1.0 · 适用输入：`TTY-T1ZDG-v1.0_20261026.mib`
 

@@ -43,7 +43,7 @@ def write_results_json(collector: ResultCollector, extra: dict[str, Any] | None 
 
 def write_junit_xml(collector: ResultCollector) -> Path:
     path = collector.run_dir / "junit.xml"
-    suites = ET.Element("testsuites", {"name": "bmc-snmp-test", "time": "0"})
+    suites = ET.Element("testsuites", {"name": "bmc-snmp-testkit", "time": "0"})
     groups: dict[str, list[dict[str, Any]]] = {}
     for result in collector.results_dict():
         groups.setdefault(result["operation"], []).append(result)

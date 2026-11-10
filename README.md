@@ -1,6 +1,8 @@
-# BMC SNMP 自动化测试框架
+# bmc-snmp-testkit
 
-基于目录内 `TTY-T1ZDG-v1.0_20261026.mib` 的**模型驱动**自动化测试框架。自动解析 MIB 生成用例，覆盖 `GET / GETNEXT / GETBULK / SET` 与 `SNMP v1 / v2c / v3`，校验 OID 读写、数据类型、取值范围、访问权限、异常输入，以及 trap/inform 的触发条件与上报内容；支持批量执行、用例管理、结果断言与多格式报告。
+MIB 驱动的 BMC SNMP 自动化测试框架，附带多人使用的只读 Web 服务。
+
+以目录内 `TTY-T1ZDG-v1.0_20261026.mib` 为默认输入（Web 服务支持各项目上传自己的 MIB）。自动解析 MIB 生成用例，覆盖 `GET / GETNEXT / GETBULK / SET` 与 `SNMP v1 / v2c / v3`，校验 OID 读写、数据类型、取值范围、访问权限、异常输入，以及 trap/inform 的触发条件与上报内容；支持批量执行、用例管理、结果断言与多格式报告。
 
 > **安全声明（务必先读）**
 > - 默认 `mode: mock`，**只连接本机 127.0.0.1 的模拟 Agent**，不连接任何真实 BMC。

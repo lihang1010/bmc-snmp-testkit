@@ -84,7 +84,7 @@ def create_app(
         await runner.stop()
 
     app = FastAPI(
-        title="BMC SNMP 只读测试服务",
+        title="bmc-snmp-testkit · 只读测试服务",
         version="1.0",
         description="多用户 · 多 MIB · 只读 GET · 串行任务 · 可追溯报告",
         lifespan=lifespan,
@@ -288,7 +288,7 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         return templates.TemplateResponse(
-            request, "index.html", {"title": "BMC SNMP 只读测试服务"}
+            request, "index.html", {"title": "bmc-snmp-testkit · 只读测试服务"}
         )
 
     @app.get("/favicon.ico")
@@ -302,7 +302,7 @@ app = create_app()
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="snmp-test-web", description="BMC SNMP 只读 Web 服务")
+    parser = argparse.ArgumentParser(prog="snmp-test-web", description="bmc-snmp-testkit 只读 Web 服务")
     parser.add_argument("--host", default=os.environ.get("SNMP_TEST_WEB_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("SNMP_TEST_WEB_PORT", "8080")))
     parser.add_argument("--root", default=None, help="工作区根目录（默认当前项目）")

@@ -293,7 +293,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="snmp-test",
-        description="MIB 驱动的 BMC SNMP 自动化测试框架（默认只连接本地模拟 Agent）",
+        description="bmc-snmp-testkit：MIB 驱动的 BMC SNMP 自动化测试框架（默认只连接本地模拟 Agent）",
     )
     parser.add_argument("--config", help="配置文件路径，默认 config/config.example.yaml")
     sub = parser.add_subparsers(dest="command", required=True)
