@@ -1,0 +1,89 @@
+# BMC SNMP 自动化测试框架 - 主配置模板
+# 复制为 config/config.yaml 后按需修改；凭据建议通过环境变量注入，勿提交明文。
+# 默认 mode: mock —— 只连接本机模拟 Agent，绝不连接真实 BMC。
+version: 1
+mode: mock                       # mock | live（live 才允许连接真实设备）
+mib: TTY-T1ZDG-v1.0_20261026.mib
+
+targets:
+  - name: mock-bmc
+    enabled: true
+    host: 127.0.0.1
+    port: 11611
+    versions: [v1, v2c, v3]
+    v1:
+      community: ${SNMP_V1_COMMUNITY:private}        # 读写团体字，用于 SET 用例
+      read_only_community: ${SNMP_RO_COMMUNITY:public}  # 只读团体字，用于权限拒绝断言
+    v2c:
+      community: ${SNMP_V2C_COMMUNITY:private}
+      read_only_community: ${SNMP_RO_COMMUNITY:public}
+    v3:
+      user: ${SNMP_V3_USER:bmcuser}
+      auth_protocol: SHA          # NONE | MD5 | SHA | SHA224 | SHA256 | SHA384 | SHA512
+      auth_key: ${SNMP_V3_AUTH_KEY:authpass123}
+      priv_protocol: AES128       # NONE | DES | 3DES | AES128 | AES192 | AES256
+      priv_key: ${SNMP_V3_PRIV_KEY:privpass123}
+      security_level: authPriv    # noAuthNoPriv | authNoPriv | authPriv
+    invalid_credentials:
+      community: invalid-community
+      v3_user: invalid-user
+      auth_key: definitely-wrong-auth-key
+      priv_key: definitely-wrong-priv-key
+
+  # 真实 BMC 示例（默认禁用；仅在显式设置 mode: live 并确认安全策略后启用）
+  # - name: lab-bmc-01
+  #   enabled: false
+  #   host: 192.0.2.100
+  #   port: 161
+  #   versions: [v1, v2c, v3]
+  #   v1:  {community: ${BMC_V1_COMMUNITY}, read_only_community: ${BMC_RO_COMMUNITY}}
+  #   v2c: {community: ${BMC_V2C_COMMUNITY}, read_only_community: ${BMC_RO_COMMUNITY}}
+  #   v3:
+  #     user: ${BMC_V3_USER}
+  #     auth_protocol: SHA
+  #     auth_key: ${BMC_V3_AUTH_KEY}
+  #     priv_protocol: AES128
+  #     priv_key: ${BMC_V3_PRIV_KEY}
+  #     security_level: authPriv
+
+mock:
+  bind_host: 127.0.0.1
+  port: 11611                    # 模拟 Agent 的 SNMP 请求端口
+  trap_port: 11612               # 模拟 Agent 发送 trap/inform 的目的端口
+  rows_per_table: 2              # 每张表在内存数据集中生成的行数
+  communities:
+    read_only: public            # 只读团体字（SET 会被 VACM 拒绝）
+    read_write: private          # 读写团体字
+  v3:
+    user: ${SNMP_V3_USER:bmcuser}
+    auth_protocol: SHA
+    auth_key: ${SNMP_V3_AUTH_KEY:authpass123}
+    priv_protocol: AES128
+    priv_key: ${SNMP_V3_PRIV_KEY:privpass123}
+
+trap:
+  listen_host: 127.0.0.1
+  listen_port: 11612
+  receive_timeout_s: 5.0
+  expectations_file: config/trap-expectations.yaml
+
+execution:
+  concurrency: 12
+  timeout_s: 2.0
+  retries: 1
+  rows_per_table: 2
+  max_cases_per_table: 8         # 0 = 不限（GET 始终覆盖全部 OID）
+  max_varbinds: 20
+  bulk_max_repetitions: 6
+  allow_guarded: false           # 高危 OID 白名单开关，必须显式置 true
+  enable_set: true
+  seed: 20261109
+  limit: 0                       # >0 时只执行前 N 条（快速冒烟）
+
+safety:
+  policy_file: config/safety-policy.yaml
+
+report:
+  output_dir: runs
+  pdu_log_sample_rate: 1.0
+  log_level: INFO

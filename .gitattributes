@@ -1,0 +1,16 @@
+# 统一文本换行，避免 Windows / Linux 混合开发或容器部署时产生整文件 diff
+* text=auto
+
+*.py     text eol=lf
+*.md     text eol=lf
+*.yaml   text eol=lf
+*.yml    text eol=lf
+*.toml   text eol=lf
+*.txt    text eol=lf
+*.j2     text eol=lf
+*.html   text eol=lf
+*.json   text eol=lf
+*.cfg    text eol=lf
+
+# MIB 是外部提供的输入文件，按设计只读，保持原始字节不做换行转换
+*.mib    -text

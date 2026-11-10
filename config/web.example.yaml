@@ -1,0 +1,28 @@
+# Web 服务配置模板。复制为 config/web.yaml 后按需修改；该文件不要提交含明文 token 的版本。
+# 未创建 config/web.yaml 时，服务以「开发模式」启动：控制台打印一次性 admin token，
+# live 关闭、目标白名单为空（即完全不能连真实设备）。
+
+# 每用户一个 token 与角色。viewer=只看，operator=可上传 MIB/提交任务，admin=额外可发起 live。
+auth:
+  users:
+    - name: alice
+      token: ${ALICE_TOKEN}
+      role: operator
+    - name: bob
+      token: ${BOB_TOKEN}
+      role: viewer
+    # - name: ops-admin
+    #   token: ${ADMIN_TOKEN}
+    #   role: admin
+
+# 服务级安全策略。readonly_only 由代码硬性置为 true，不受此处影响。
+# 只有显式把 allow_live 打开、并在 allowed_targets 列出 IP，admin 才能发起 live 只读 GET。
+security:
+  allow_live: false
+  allowed_targets: []
+  # - 192.0.2.10
+
+# 说明：
+#  - 目标端口、SNMP 版本、团体字 / v3 凭据由每次任务提交时在内存中传入，绝不写入本文件。
+#  - 任务串行执行（单 worker），模拟 Agent 用 11811、trap 监听用 11812，避免与 CLI/test 的 11611/11711 冲突。
+#  - 报告输出到 runs/web-<job_id>/，仅已认证用户可访问。

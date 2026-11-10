@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bmc-snmp-test"
+version = "1.0.0"
+description = "MIB-driven automated test framework for BMC SNMP agents"
+requires-python = ">=3.10"
+dependencies = [
+    "pysnmp==7.1.21",
+    "pyasn1==0.6.5",
+    "pytest==9.1.1",
+    "PyYAML==6.0.3",
+    "Jinja2==3.1.6",
+    "fastapi==0.141.1",
+    "starlette==1.3.1",
+    "uvicorn==0.52.1",
+    "httpx==0.28.1",
+]
+
+[project.scripts]
+snmp-test = "snmp_test.cli:main"
+snmp-test-web = "snmp_test.service.app:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+snmp_test = ["report/templates/*.j2", "service/templates/*.html"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+    "ignore:CFB has been moved",
+    "ignore::DeprecationWarning:pysnmp.*",
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
+markers = [
+    "v1: SNMP v1 cases",
+    "v2c: SNMP v2c cases",
+    "v3: SNMP v3 cases",
+    "get: GET operation",
+    "getnext: GETNEXT operation",
+    "getbulk: GETBULK operation",
+    "set: SET operation (guarded by safety policy)",
+    "trap: notification verification",
+    "negative: expected rejection / invalid input",
+    "guarded: requires --allow-guarded",
+]

@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  :root{--bg:#0f172a;--card:#1e293b;--line:#334155;--text:#e2e8f0;--muted:#94a3b8;--ok:#22c55e;--fail:#ef4444;--warn:#f59e0b;--accent:#38bdf8}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 "Segoe UI",system-ui,-apple-system,"Microsoft YaHei",sans-serif}
+  header{padding:20px 28px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,#0f172a,#1e293b);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+  h1{font-size:20px;margin:0}
+  .sub{color:var(--muted);font-size:12px;margin-top:2px}
+  .wrap{max-width:1400px;margin:0 auto;padding:22px 28px 60px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
+  h2{font-size:15px;margin:0 0 12px;padding-left:9px;border-left:3px solid var(--accent)}
+  label{display:block;color:var(--muted);font-size:12px;margin:8px 0 4px}
+  input,select,textarea,button{font:inherit;border-radius:6px;border:1px solid var(--line);padding:8px 10px;background:#0b1220;color:var(--text);width:100%}
+  button{cursor:pointer;background:var(--accent);color:#06121f;border:none;font-weight:600;width:auto;padding:8px 16px}
+  button.secondary{background:transparent;color:var(--text);border:1px solid var(--line)}
+  button:hover{filter:brightness(1.1)}
+  .row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+  .row>*{flex:1;min-width:110px}
+  .row>button{flex:0 0 auto}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600}
+  tr:last-child td{border-bottom:none}
+  code{color:var(--accent);font-size:12px}
+  .pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;border:1px solid var(--line);color:var(--muted)}
+  .ok{color:var(--ok)}.fail{color:var(--fail)}.warn{color:var(--warn)}.muted{color:var(--muted)}
+  .bar{height:5px;background:#0b1220;border-radius:3px;overflow:hidden;min-width:80px}
+  .bar>i{display:block;height:100%;background:var(--ok)}
+  .note{background:#0b1220;border:1px solid var(--line);border-radius:8px;padding:10px 12px;color:var(--muted);font-size:12px;margin-top:12px}
+  .gate{background:#241b1f;border:1px solid #7f1d1d;border-radius:8px;padding:10px 12px;font-size:12px;color:#fca5a5;margin-bottom:14px}
+  #toast{position:fixed;right:20px;bottom:20px;background:#1e293b;border:1px solid var(--line);border-radius:8px;padding:10px 14px;display:none;max-width:420px;z-index:10}
+  a{color:var(--accent)}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>BMC SNMP 只读测试服务</h1><div class="sub">多用户 · 每个项目独立 MIB · 串行任务 · 报告可追溯</div></div>
+  <div id="userBox" class="muted">未连接</div>
+</header>
+<div class="wrap">
+
+  <div id="gate" class="gate hidden"></div>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>连接</h2>
+        <label>访问 Token（服务端按用户分发，不在页面存储）</label>
+        <div class="row">
+          <input id="token" type="password" placeholder="输入 token">
+          <button id="loginBtn">连接</button>
+          <button class="secondary" id="logoutBtn">退出</button>
+        </div>
+        <div class="note" id="cap">只读服务：仅允许 GET；SET、高危 OID、错误凭据探测均不可通过 API 触发。live 需 admin 角色且目标在服务端白名单内。</div>
+      </div>
+
+      <div class="card">
+        <h2>上传项目 MIB</h2>
+        <label>每个 MIB 按内容哈希独立存放，自动生成专属模型与用例仓库</label>
+        <div class="row">
+          <input id="mibFile" type="file" accept=".mib,.txt,.my">
+          <button id="uploadBtn">上传并解析</button>
+        </div>
+        <div class="note">同名/同内容 MIB 自动去重；单文件上限 4 MB；MIB 内容上传后只读，不会被改写。</div>
+      </div>
+
+      <div class="card">
+        <h2>MIB 列表</h2>
+        <table><thead><tr><th>ID</th><th>文件 / 模块</th><th>节点 / 用例</th><th>根 OID</th><th></th></tr></thead>
+        <tbody id="mibBody"><tr><td colspan="5" class="muted">连接后加载</td></tr></tbody></table>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>提交只读任务</h2>
+        <label>模式</label>
+        <select id="mode"><option value="mock">mock（本地模拟 Agent，安全）</option><option value="live">live（真实 BMC，需 admin + 白名单）</option></select>
+        <div class="row">
+          <div><label>目标 IP</label><input id="host" value="127.0.0.1"></div>
+          <div><label>端口</label><input id="port" type="number" value="161"></div>
+        </div>
+        <div class="row">
+          <div><label>SNMP 版本</label><select id="version"><option>v1</option><option>v2c</option><option>v3</option></select></div>
+          <div><label>用例上限</label><input id="limit" type="number" value="20" min="1" max="500"></div>
+        </div>
+        <label>MIB ID</label><input id="mibId" placeholder="从左侧列表选择或粘贴">
+        <label>模块过滤（可选，逗号分隔）</label><input id="modules" placeholder="serverSysInfo,serverStatus">
+        <div id="v1cred">
+          <label>团体字（仅在内存中使用，不落盘）</label><input id="community" type="password" placeholder="v1 / v2c community">
+        </div>
+        <div id="v3cred" class="hidden">
+          <div class="row"><div><label>v3 用户</label><input id="v3user"></div><div><label>安全级别</label><select id="v3level"><option>authPriv</option><option>authNoPriv</option><option>noAuthNoPriv</option></select></div></div>
+          <div class="row"><div><label>认证协议</label><select id="v3auth"><option>SHA</option><option>MD5</option><option>SHA256</option><option>NONE</option></select></div><div><label>加密协议</label><select id="v3priv"><option>AES128</option><option>DES</option><option>AES256</option><option>NONE</option></select></div></div>
+          <div class="row"><div><label>认证密钥</label><input id="v3authkey" type="password"></div><div><label>加密密钥</label><input id="v3privkey" type="password"></div></div>
+        </div>
+        <div style="margin-top:14px"><button id="submitBtn">提交任务</button></div>
+      </div>
+
+      <div class="card">
+        <h2>任务队列</h2>
+        <table><thead><tr><th>任务</th><th>用户 / MIB</th><th>目标</th><th>状态</th><th>结果</th><th>报告</th></tr></thead>
+        <tbody id="jobBody"><tr><td colspan="6" class="muted">连接后加载</td></tr></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+(function(){
+  var $ = function(id){return document.getElementById(id)};
+  var toastTimer = null;
+  function toast(msg, bad){
+    var t=$('toast'); t.textContent=msg; t.style.borderColor = bad ? 'var(--fail)' : 'var(--line)';
+    t.style.display='block'; clearTimeout(toastTimer); toastTimer=setTimeout(function(){t.style.display='none'}, 4200);
+  }
+  function api(path, opts){
+    opts = opts || {};
+    opts.credentials = 'same-origin';
+    return fetch(path, opts).then(function(r){
+      if(!r.ok){ return r.json().then(function(d){throw new Error(d.detail || ('HTTP '+r.status))}); }
+      return r.json();
+    });
+  }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]}); }
+
+  $('version').addEventListener('change', function(){
+    var v3 = this.value==='v3';
+    $('v1cred').classList.toggle('hidden', v3);
+    $('v3cred').classList.toggle('hidden', !v3);
+  });
+
+  $('loginBtn').addEventListener('click', function(){
+    var token=$('token').value.trim();
+    if(!token){ toast('请输入 token', true); return; }
+    api('/api/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token})})
+      .then(function(d){ $('token').value=''; $('userBox').innerHTML='<span class="ok">'+esc(d.user)+'</span> <span class="pill">'+esc(d.role)+'</span>';
+        $('gate').classList.add('hidden'); refresh(); })
+      .catch(function(e){ toast('连接失败: '+e.message, true); });
+  });
+  $('logoutBtn').addEventListener('click', function(){
+    api('/api/session',{method:'DELETE'}).then(function(){ $('userBox').textContent='未连接'; });
+  });
+
+  $('uploadBtn').addEventListener('click', function(){
+    var f=$('mibFile').files[0];
+    if(!f){ toast('请先选择 MIB 文件', true); return; }
+    $('uploadBtn').disabled=true;
+    f.arrayBuffer().then(function(buf){
+      return api('/api/mibs',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-MIB-Filename':encodeURIComponent(f.name)},body:buf});
+    }).then(function(d){
+      $('mibId').value=d.mib.mib_id;
+      toast('已生成 '+d.mib.case_count+' 条用例（'+d.mib.mib_id+'）'); refresh();
+    }).catch(function(e){ toast('上传失败: '+e.message, true); })
+      .finally(function(){ $('uploadBtn').disabled=false; });
+  });
+
+  $('submitBtn').addEventListener('click', function(){
+    var cred={}, version=$('version').value;
+    if(version==='v3'){
+      cred={v3_user:$('v3user').value, security_level:$('v3level').value,
+            auth_protocol:$('v3auth').value, priv_protocol:$('v3priv').value,
+            auth_key:$('v3authkey').value, priv_key:$('v3privkey').value};
+    } else { cred={community:$('community').value}; }
+    var body={
+      mib_id:$('mibId').value.trim(), mode:$('mode').value,
+      target_host:$('host').value.trim(), target_port:parseInt($('port').value||'161',10),
+      version:version, limit:parseInt($('limit').value||'20',10),
+      modules:$('modules').value.split(',').map(function(s){return s.trim()}).filter(Boolean),
+      credential:cred
+    };
+    if(!body.mib_id){ toast('请先选择 MIB', true); return; }
+    $('submitBtn').disabled=true;
+    api('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(d){ toast('任务已入队: '+d.job.job_id); refresh(); setTimeout(refresh, 1500); })
+      .catch(function(e){ toast('提交失败: '+e.message, true); })
+      .finally(function(){ $('submitBtn').disabled=false; });
+  });
+
+  function statusCell(s){
+    var cls = s==='done'?'ok':(s==='failed'?'fail':(s==='running'||s==='queued'?'warn':'muted'));
+    return '<span class="'+cls+'">'+esc(s)+'</span>';
+  }
+
+  function refresh(){
+    api('/api/session').then(function(d){
+      $('userBox').innerHTML='<span class="ok">'+esc(d.user)+'</span> <span class="pill">'+esc(d.role)+'</span>';
+      $('gate').classList.add('hidden');
+    }).catch(function(){
+      $('gate').classList.remove('hidden');
+      $('gate').textContent='未认证或会话已过期：请输入服务端分发的 token 后点击「连接」。';
+      $('mibBody').innerHTML='<tr><td colspan="5" class="muted">未连接</td></tr>';
+      $('jobBody').innerHTML='<tr><td colspan="6" class="muted">未连接</td></tr>';
+      return null;
+    }).then(function(ok){
+      if(ok===null) return;
+      api('/api/config').then(function(c){
+        $('cap').textContent='只读服务：仅 GET；live_enabled='+c.live_enabled+
+          '；白名单='+(c.allowed_targets.length?c.allowed_targets.join(', '):'（空，禁止 live）')+
+          '；队列='+c.queue_length+'；MIB 数='+c.mib_count;
+      }).catch(function(){});
+      api('/api/mibs').then(function(d){
+        if(!d.mibs.length){ $('mibBody').innerHTML='<tr><td colspan="5" class="muted">暂无 MIB，请先上传</td></tr>'; return; }
+        $('mibBody').innerHTML=d.mibs.map(function(m){
+          return '<tr><td><code>'+esc(m.mib_id)+'</code></td><td>'+esc(m.filename)+'<br><span class="muted">'+esc(m.module_name)+'</span></td>'+
+            '<td>'+m.node_count+' / '+m.case_count+'<br><span class="muted">告警 '+m.warning_count+'</span></td>'+
+            '<td><code>'+esc(m.root_oid)+'</code></td>'+
+            '<td><button class="secondary" onclick="document.getElementById(\'mibId\').value=\''+esc(m.mib_id)+'\'">选用</button></td></tr>';
+        }).join('');
+      }).catch(function(e){ toast('加载 MIB 失败: '+e.message, true); });
+      api('/api/jobs').then(function(d){
+        if(!d.jobs.length){ $('jobBody').innerHTML='<tr><td colspan="6" class="muted">暂无任务</td></tr>'; return; }
+        var pending=false;
+        $('jobBody').innerHTML=d.jobs.map(function(j){
+          if(j.status==='queued'||j.status==='running') pending=true;
+          var s=j.summary||{}, rate=s.effective_pass_rate;
+          var result = j.status==='done'
+            ? '<div>'+(s.passed||0)+'/'+(s.total||0)+' <span class="ok">'+rate+'%</span></div><div class="bar"><i style="width:'+rate+'%"></i></div>'
+            : '<span class="muted">'+esc(j.message||'-')+'</span>';
+          var report = j.run_id ? '<a href="/runs/'+esc(j.run_id)+'/report.html" target="_blank">HTML</a> · <a href="/runs/'+esc(j.run_id)+'/results.json" target="_blank">JSON</a>' : '-';
+          return '<tr><td><code>'+esc(j.job_id)+'</code><br><span class="muted">'+esc(j.mode)+' / '+esc(j.version)+' / '+j.limit+'</span></td>'+
+            '<td>'+esc(j.user)+'<br><span class="muted"><code>'+esc(j.mib_id)+'</code></span></td>'+
+            '<td>'+esc(j.target_host)+':'+j.target_port+'</td>'+
+            '<td>'+statusCell(j.status)+'</td><td>'+result+'</td><td>'+report+'</td></tr>';
+        }).join('');
+        if(pending) setTimeout(refresh, 2000);
+      }).catch(function(e){ toast('加载任务失败: '+e.message, true); });
+    });
+  }
+
+  refresh();
+  setInterval(refresh, 8000);
+})();
+</script>
+</body>
+</html>

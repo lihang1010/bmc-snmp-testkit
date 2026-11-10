@@ -1,0 +1,11 @@
+# 已在 Python 3.10.11 / Windows 验收的组合，请勿单独升级 pysnmp 或 pyasn1。
+# pysnmp 7.x 为维护中的 asyncio API 分支；4.4.x 需改用 pyasn1==0.4.8 且 API 不同。
+pysnmp==7.1.21
+pyasn1==0.6.5
+pytest==9.1.1
+PyYAML==6.0.3
+Jinja2==3.1.6
+fastapi==0.141.1
+starlette==1.3.1
+uvicorn==0.52.1
+httpx==0.28.1

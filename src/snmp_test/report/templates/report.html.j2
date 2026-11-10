@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BMC SNMP 自动化测试报告 · {{ run_id }}</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0; --muted:#94a3b8;
+          --ok:#22c55e; --fail:#ef4444; --warn:#f59e0b; --skip:#64748b; --accent:#38bdf8; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 "Segoe UI",system-ui,-apple-system,"Microsoft YaHei",sans-serif; }
+  header { padding:28px 32px 20px; border-bottom:1px solid var(--line); background:linear-gradient(135deg,#0f172a,#1e293b); }
+  h1 { margin:0 0 6px; font-size:24px; letter-spacing:.3px; }
+  .sub { color:var(--muted); font-size:13px; }
+  .wrap { padding:24px 32px 48px; max-width:1600px; margin:0 auto; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; margin-bottom:24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; }
+  .card .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.6px; }
+  .card .value { font-size:26px; font-weight:600; margin-top:4px; }
+  .ok { color:var(--ok); } .fail { color:var(--fail); } .warn { color:var(--warn); } .skip { color:var(--skip); }
+  h2 { font-size:16px; margin:28px 0 12px; padding-left:10px; border-left:3px solid var(--accent); }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  th, td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--line); font-size:13px; vertical-align:top; }
+  th { color:var(--muted); font-weight:600; background:#172033; position:sticky; top:0; }
+  tr:last-child td { border-bottom:none; }
+  .bar { height:6px; background:#0b1220; border-radius:4px; overflow:hidden; min-width:90px; }
+  .bar > i { display:block; height:100%; background:var(--ok); }
+  .tag { display:inline-block; padding:1px 7px; margin:1px 3px 1px 0; border:1px solid var(--line); border-radius:10px; font-size:11px; color:var(--muted); }
+  .status { font-weight:600; }
+  .meta { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px 24px; color:var(--muted); font-size:13px; }
+  .meta b { color:var(--text); font-weight:500; }
+  .controls { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  input, select { background:#0b1220; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:7px 10px; font:inherit; }
+  input { flex:1; min-width:220px; }
+  pre { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:14px; overflow:auto; max-height:340px; font-size:12px; color:#cbd5e1; }
+  .failbox { background:#241b1f; border:1px solid #7f1d1d; border-radius:8px; padding:12px 14px; margin-bottom:10px; }
+  .failbox code { color:#fca5a5; }
+  .scroll { max-height:520px; overflow:auto; border-radius:8px; }
+  footer { color:var(--muted); font-size:12px; text-align:center; padding:20px; border-top:1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1>BMC SNMP 自动化测试报告</h1>
+  <div class="sub">运行 ID <b>{{ run_id }}</b> · 生成于 {{ generated_at }} · 模式 <b>{{ mode }}</b> · 报告为静态产物，凭据已脱敏</div>
+</header>
+<div class="wrap">
+
+  <div class="grid">
+    <div class="card"><div class="label">通过率</div><div class="value {% if summary.overall.pass_rate >= 95 %}ok{% elif summary.overall.pass_rate >= 80 %}warn{% else %}fail{% endif %}">{{ summary.overall.pass_rate }}%</div></div>
+    <div class="card"><div class="label">有效通过率</div><div class="value">{{ summary.overall.effective_pass_rate }}%</div></div>
+    <div class="card"><div class="label">用例总数</div><div class="value">{{ summary.overall.total }}</div></div>
+    <div class="card"><div class="label">通过 / 失败 / 错误</div><div class="value"><span class="ok">{{ summary.overall.passed }}</span> / <span class="fail">{{ summary.overall.failed }}</span> / {{ summary.overall.error }}</div></div>
+    <div class="card"><div class="label">跳过 / 安全阻断</div><div class="value"><span class="skip">{{ summary.overall.skipped }}</span> / <span class="warn">{{ summary.overall.blocked }}</span></div></div>
+    <div class="card"><div class="label">耗时</div><div class="value">{{ summary.duration_s }}s</div></div>
+  </div>
+
+  <h2>运行元数据</h2>
+  <div class="meta">
+    <div>MIB：<b>{{ mib.name }}</b></div>
+    <div>模块名：<b>{{ mib.module }}</b></div>
+    <div>企业根 OID：<b>{{ mib.root }}</b></div>
+    <div>MIB SHA-256：<b>{{ mib.sha256[:16] }}…</b></div>
+    <div>用例数：<b>{{ snapshots.case_count }}</b></div>
+    <div>允许高危 SET：<b>{{ '是' if policy.allow_guarded else '否' }}</b></div>
+    <div>SET 总开关：<b>{{ '开启' if policy.set_enabled else '关闭' }}</b></div>
+    <div>硬阻断节点数：<b>{{ policy.hard_blocked|length }}</b></div>
+    {% for t in targets %}<div>目标：<b>{{ t.name }}</b> {{ t.host }}:{{ t.port }} {{ t.versions|join(', ') }}</div>{% endfor %}
+  </div>
+
+  <h2>分组通过率</h2>
+  {% for dim, label in [('by_version','按 SNMP 版本'),('by_operation','按操作'),('by_module','按模块'),('by_target','按目标')] %}
+  <h3 style="font-size:13px;color:var(--muted);margin:16px 0 8px;">{{ label }}</h3>
+  <table>
+    <thead><tr><th>分组</th><th>总数</th><th>通过</th><th>失败</th><th>错误</th><th>跳过</th><th>阻断</th><th>通过率</th><th style="width:140px">分布</th></tr></thead>
+    <tbody>
+    {% for key, g in summary[dim].items() %}
+      <tr><td>{{ key }}</td><td>{{ g.total }}</td><td class="ok">{{ g.passed }}</td><td class="fail">{{ g.failed }}</td><td>{{ g.error }}</td><td>{{ g.skipped }}</td><td>{{ g.blocked }}</td><td>{{ g.effective_pass_rate }}%</td>
+      <td><div class="bar"><i style="width:{{ g.effective_pass_rate }}%;background:{{ 'var(--ok)' if g.effective_pass_rate >= 95 else 'var(--warn)' if g.effective_pass_rate >= 80 else 'var(--fail)' }}"></i></div></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endfor %}
+
+  <h2>失败用例详情（{{ failures|length }}）</h2>
+  {% if failures %}
+    {% for f in failures[:200] %}
+      <div class="failbox">
+        <div><code>{{ f.case_id }}</code> · <b>{{ f.name }}</b> · <span class="fail">{{ f.status }}</span> · {{ f.operation }}/{{ f.version }} · {{ f.target }}</div>
+        <div style="color:var(--muted);margin-top:4px">原因：{{ f.message }}</div>
+        <details><summary style="cursor:pointer;color:var(--accent);margin-top:6px">查看期望与实际</summary>
+          <pre>期望：{{ f.expectation | tojson(indent=2) }}
+实际：{{ f.actual | tojson(indent=2) }}</pre>
+        </details>
+      </div>
+    {% endfor %}
+    {% if failures|length > 200 %}<p class="sub">仅显示前 200 条，完整数据见 results.json。</p>{% endif %}
+  {% else %}<p class="ok">无失败用例。</p>{% endif %}
+
+  <h2>全部用例（{{ results|length }}）</h2>
+  <div class="controls">
+    <input id="q" placeholder="搜索用例名 / OID / 用例 ID / 模块…">
+    <select id="status"><option value="">全部状态</option><option value="passed">passed</option><option value="failed">failed</option><option value="error">error</option><option value="skipped">skipped</option><option value="blocked">blocked</option></select>
+    <select id="op"><option value="">全部操作</option><option>GET</option><option>GETNEXT</option><option>GETBULK</option><option>SET</option><option>TRAP</option><option>INFORM</option></select>
+    <select id="ver"><option value="">全部版本</option><option>v1</option><option>v2c</option><option>v3</option></select>
+  </div>
+  <div class="scroll"><table id="cases">
+    <thead><tr><th>用例 ID</th><th>名称</th><th>操作</th><th>版本</th><th>目标</th><th>状态</th><th>耗时(ms)</th><th>说明</th><th>标签</th></tr></thead>
+    <tbody>
+    {% for r in results %}
+      <tr data-status="{{ r.status }}" data-op="{{ r.operation }}" data-ver="{{ r.version }}">
+        <td><code>{{ r.case_id }}</code></td>
+        <td>{{ r.name }}<br><span class="sub">{{ r.module }}</span></td>
+        <td>{{ r.operation }}</td><td>{{ r.version }}</td><td>{{ r.target }}</td>
+        <td class="status {{ 'ok' if r.status == 'passed' else 'fail' if r.status in ('failed','error') else 'skip' }}">{{ r.status }}</td>
+        <td>{{ r.duration_ms }}</td>
+        <td>{{ r.message }}</td>
+        <td>{% for t in r.tags %}<span class="tag">{{ t }}</span>{% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+
+  <h2>运行日志（末尾 80 行）</h2>
+  <pre>{{ log_tail }}</pre>
+
+  <h2>产物</h2>
+  <div class="meta">
+    <div>results.json：<b>{{ extra.results_json if extra.results_json else 'results.json' }}</b></div>
+    <div>junit.xml：<b>junit.xml</b></div>
+    <div>PDU 明细：<b>pdus.jsonl</b></div>
+    <div>配置快照：<b>config-snapshot.yaml</b></div>
+    <div>用例清单：<b>case-manifest.json</b></div>
+    <div>安全审计：<b>safety-audit.jsonl</b></div>
+  </div>
+</div>
+<footer>由 bmc-snmp-test 生成 · 相同 MIB SHA-256 与用例清单可重复执行 · 不包含任何真实凭据</footer>
+<script>
+(function(){
+  var q=document.getElementById('q'), s=document.getElementById('status'),
+      o=document.getElementById('op'), v=document.getElementById('ver');
+  var rows=[].slice.call(document.querySelectorAll('#cases tbody tr'));
+  function apply(){
+    var term=q.value.toLowerCase();
+    rows.forEach(function(r){
+      var text=r.textContent.toLowerCase();
+      r.style.display = (text.indexOf(term)>=0 &&
+        (!s.value || r.dataset.status===s.value) &&
+        (!o.value || r.dataset.op===o.value) &&
+        (!v.value || r.dataset.ver===v.value)) ? '' : 'none';
+    });
+  }
+  [q,s,o,v].forEach(function(el){el.addEventListener('input',apply);el.addEventListener('change',apply);});
+})();
+</script>
+</body>
+</html>

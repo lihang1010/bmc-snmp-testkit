@@ -1,0 +1,41 @@
+# SET 安全策略。生成期与执行期双重校验，默认绝不触碰状态变更类 OID。
+# - blocked : 永不执行，即使 --allow-guarded + 白名单
+# - guarded : 需同时满足「加入 whitelist.names」与 --allow-guarded
+# - safe    : 允许 SET，但仍强制 GET 备份 -> SET -> 读回 -> finally 还原
+version: 1
+set_enabled: true
+restore_on_failure_abort_target: true
+
+hard_block:
+  # 电源控制会改变服务器运行状态；用户增删会改变 BMC 账户，均不可逆/高风险
+  names:
+    - serverPowerStatusControl
+    - serverIDLEDStatusControl
+    - addBmcUser
+    - delBmcUser
+    - clearSel
+    - clearEventLog
+  name_patterns:
+    - '(?i)power.*(control|cycle|reset|off|on)$'
+    - '(?i)(reset|reboot|shutdown).*(bmc|server)$'
+
+blacklist:
+  # 这些配置改错会导致带外失联或凭据泄漏
+  access:
+    - write-only
+  names:
+    - delBmcUserSession
+    - deleteSession
+    - sessionDelete
+    - clearEventLog
+  name_patterns:
+    - '(?i)ipv4(address|gateway|subnetmask)$'
+    - '(?i)ipv6(address|gateway|prefix)$'
+    - '(?i)(add|del|delete|remove).*(user|session)$'
+    - '(?i)(passwd|password|secret|community)$'
+    - '(?i)(restore|factory|reset).*(default|config)$'
+  oid_prefixes: []
+
+# 只有列在这里的 guarded 节点才可能被 --allow-guarded 放行
+whitelist:
+  names: []
