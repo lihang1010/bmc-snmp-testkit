@@ -191,6 +191,52 @@
     transition:background .15s,border-color .15s;
   }
   .link-btn:hover{background:#e0f2fe;border-color:#7dd3fc}
+  td.actions{white-space:nowrap}
+  td.actions .btn+.btn{margin-left:6px}
+  .viewer{position:fixed;inset:0;z-index:60;display:flex;justify-content:flex-end}
+  .viewer-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.35);backdrop-filter:blur(2px)}
+  .viewer-panel{position:relative;width:min(700px,100vw);height:100%;display:flex;flex-direction:column;
+    background:var(--surface);border-left:1px solid var(--line);box-shadow:-24px 0 60px rgba(15,23,42,.18);
+    animation:viewer-in .2s ease-out}
+  @keyframes viewer-in{from{transform:translateX(24px);opacity:.6}to{transform:none;opacity:1}}
+  .viewer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+    padding:18px 20px 14px;border-bottom:1px solid var(--line-soft)}
+  .viewer-title{font-size:15px;font-weight:700;word-break:break-all}
+  .viewer-sub{font-size:11.5px;color:var(--faint);margin-top:2px;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .icon-btn{width:30px;height:30px;flex:0 0 30px;border:1px solid var(--line);border-radius:8px;
+    background:var(--surface);color:var(--muted);font-size:16px;line-height:1;cursor:pointer}
+  .icon-btn:hover{background:var(--surface-2);border-color:#cbd5e1}
+  .viewer-tabs{display:flex;gap:4px;padding:10px 20px 0}
+  .viewer-tabs button{border:0;background:transparent;color:var(--muted);font:inherit;
+    font-size:12.5px;font-weight:650;padding:7px 10px;border-radius:8px;cursor:pointer}
+  .viewer-tabs button.active{background:#f0f9ff;color:var(--accent)}
+  .viewer-tabs b{font-weight:600;color:var(--faint);margin-left:4px;font-size:11px}
+  .viewer-toolbar{display:flex;gap:8px;padding:12px 20px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+  .viewer-toolbar input{flex:1 1 180px;height:36px}
+  .viewer-toolbar select{flex:0 0 118px;height:36px}
+  .viewer-body{flex:1 1 auto;overflow:auto;padding:6px 20px 12px}
+  .viewer-list{display:flex;flex-direction:column}
+  .row-item{padding:10px 0;border-bottom:1px solid var(--line-soft)}
+  .row-item:last-child{border-bottom:none}
+  .row-main{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .row-name{font-size:12.5px;font-weight:650}
+  .row-meta{display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap;font-size:11px}
+  .row-item.expandable .row-main{cursor:pointer}
+  .row-item .caret{margin-left:auto;color:var(--faint);font-size:10px;transition:transform .15s}
+  .row-item.open .caret{transform:rotate(180deg)}
+  .row-detail{margin-top:8px;padding:10px 12px;background:var(--surface-2);
+    border:1px solid var(--line-soft);border-radius:8px;font-size:11.5px}
+  .detail-line{display:flex;gap:8px;padding:2px 0}
+  .detail-key{flex:0 0 62px;color:var(--faint);font-weight:600}
+  .detail-value{flex:1 1 auto;color:var(--text);word-break:break-word}
+  .assert-list{margin:0;padding-left:18px;color:var(--text)}
+  .assert-list li{margin:1px 0}
+  .viewer-empty{padding:48px 0;text-align:center;color:var(--faint);font-size:12px}
+  .viewer-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:12px 20px;border-top:1px solid var(--line-soft)}
+  #viewerRange{font-size:11.5px;color:var(--muted)}
+  .viewer-foot>div{display:flex;gap:8px}
+  @media(max-width:620px){.viewer-panel{width:100vw}.viewer-toolbar select{flex:0 0 100px}}
   #toast{
     position:fixed;right:24px;bottom:24px;z-index:50;display:none;
     max-width:min(420px,calc(100vw - 48px));
@@ -304,6 +350,38 @@
     </section>
   </div>
 </div>
+<div id="viewer" class="viewer hidden">
+  <div class="viewer-backdrop" id="viewerBackdrop"></div>
+  <aside class="viewer-panel" role="dialog" aria-modal="true" aria-labelledby="viewerTitle">
+    <header class="viewer-head">
+      <div>
+        <div class="viewer-title" id="viewerTitle">MIB</div>
+        <div class="viewer-sub" id="viewerSub">—</div>
+      </div>
+      <button class="icon-btn" id="viewerClose" type="button" aria-label="关闭">×</button>
+    </header>
+    <div class="viewer-tabs">
+      <button type="button" data-view="nodes" class="active">节点 <b id="nodeTotal">0</b></button>
+      <button type="button" data-view="cases">用例 <b id="caseTotal">0</b></button>
+    </div>
+    <div class="viewer-toolbar">
+      <input id="viewerQuery" placeholder="搜索名称 / OID / 用例 ID">
+      <select id="viewerFilterA"></select>
+      <select id="viewerFilterB"></select>
+    </div>
+    <div class="viewer-body">
+      <div id="viewerNodes" class="viewer-list"></div>
+      <div id="viewerCases" class="viewer-list hidden"></div>
+    </div>
+    <footer class="viewer-foot">
+      <span id="viewerRange">0 / 0</span>
+      <div>
+        <button class="btn btn--ghost btn--sm" id="viewerPrev" type="button" disabled>上一页</button>
+        <button class="btn btn--ghost btn--sm" id="viewerNext" type="button" disabled>下一页</button>
+      </div>
+    </footer>
+  </aside>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -390,6 +468,195 @@
       .finally(function(){ $('submitBtn').disabled=false; });
   });
 
+  // ---- node / case viewer ----
+  var viewerState = { mibId: '', tab: 'nodes', offset: 0, limit: 50,
+                      total: 0, query: '', filterA: '', filterB: '', timer: null };
+
+  function openViewer(mibId, filename){
+    viewerState.mibId = mibId;
+    viewerState.offset = 0; viewerState.query = '';
+    viewerState.filterA = ''; viewerState.filterB = '';
+    $('viewerTitle').textContent = filename || 'MIB';
+    $('viewerSub').textContent = mibId;
+    $('viewerQuery').value = '';
+    $('viewer').classList.remove('hidden');
+    setViewerTab('nodes');
+  }
+  function closeViewer(){ $('viewer').classList.add('hidden'); }
+
+  function setViewerTab(tab){
+    viewerState.tab = tab; viewerState.offset = 0;
+    viewerState.query = ''; viewerState.filterA = ''; viewerState.filterB = '';
+    $('viewerQuery').value = '';
+    document.querySelectorAll('.viewer-tabs button').forEach(function(b){
+      b.classList.toggle('active', b.dataset.view === tab);
+    });
+    $('viewerNodes').classList.toggle('hidden', tab !== 'nodes');
+    $('viewerCases').classList.toggle('hidden', tab !== 'cases');
+    if(tab === 'nodes'){
+      $('viewerFilterA').innerHTML = '<option value="">全部类型</option><option>column</option><option>scalar</option><option>table</option><option>entry</option><option>group</option>';
+      $('viewerFilterB').innerHTML = '<option value="">全部权限</option><option>read-only</option><option>read-write</option><option>write-only</option><option>not-accessible</option>';
+    } else {
+      $('viewerFilterA').innerHTML = '<option value="">全部操作</option><option>GET</option><option>SET</option><option>GETNEXT</option><option>GETBULK</option><option>TRAP</option><option>INFORM</option>';
+      $('viewerFilterB').innerHTML = '<option value="">全部类别</option><option>normal</option><option>boundary</option><option>invalid</option><option>access</option><option>trap</option><option>compat</option>';
+    }
+    $('viewerNodes').innerHTML = '';
+    $('viewerCases').innerHTML = '';
+    loadViewer();
+  }
+
+  function loadViewer(){
+    if(!viewerState.mibId) return;
+    var isNodes = viewerState.tab === 'nodes';
+    var params = new URLSearchParams({
+      limit: String(viewerState.limit), offset: String(viewerState.offset), q: viewerState.query
+    });
+    if(isNodes){
+      if(viewerState.filterA) params.set('kind', viewerState.filterA);
+      if(viewerState.filterB) params.set('access', viewerState.filterB);
+    } else {
+      if(viewerState.filterA) params.set('operation', viewerState.filterA);
+      if(viewerState.filterB) params.set('category', viewerState.filterB);
+    }
+    api('/api/mibs/'+viewerState.mibId+(isNodes?'/nodes':'/cases')+'?'+params.toString())
+      .then(function(d){
+        viewerState.total = d.total;
+        if(isNodes){ renderNodes(d.nodes); $('nodeTotal').textContent = d.total; }
+        else { renderCases(d.cases); $('caseTotal').textContent = d.total; }
+        var from = d.total ? d.offset + 1 : 0;
+        var to = Math.min(d.offset + d.limit, d.total);
+        $('viewerRange').textContent = from + '–' + to + ' / ' + d.total;
+        $('viewerPrev').disabled = d.offset <= 0;
+        $('viewerNext').disabled = d.offset + d.limit >= d.total;
+      })
+      .catch(function(e){ toast('加载失败: '+e.message, true); });
+  }
+
+  function renderNodes(list){
+    if(!list.length){ $('viewerNodes').innerHTML = '<div class="viewer-empty">没有匹配的节点</div>'; return; }
+    $('viewerNodes').innerHTML = list.map(function(n){
+      var syntax = n.syntax ? (n.syntax.base || '') : '';
+      var index = (n.index_names && n.index_names.length) ? '索引: ' + n.index_names.join(', ') : '';
+      return '<div class="row-item" title="'+esc(n.description || '')+'">'+
+        '<div class="row-main"><span class="row-name">'+esc(n.name)+'</span><code>'+esc(n.oid)+'</code></div>'+
+        '<div class="row-meta">'+
+        '<span class="pill">'+esc(n.kind)+'</span>'+
+        '<span class="pill">'+esc(n.access || '-')+'</span>'+
+        (syntax?'<span class="muted">'+esc(syntax)+'</span>':'')+
+        (n.table_name?'<span class="muted">表 '+esc(n.table_name)+'</span>':'')+
+        (index?'<span class="muted">'+esc(index)+'</span>':'')+
+        '</div></div>';
+    }).join('');
+  }
+
+  function describeAssertion(spec){
+    var kind = spec.kind;
+    var allowed = (spec.allowed || []).join(' / ');
+    if(kind === 'no_error') return '不报错（noError）';
+    if(kind === 'rejected') return '必须被拒绝（错误码或异常值）';
+    if(kind === 'no_such') return '返回 noSuchName / NoSuchObject';
+    if(kind === 'end_of_mib') return '到达 MIB 末尾（endOfMibView 或 v1 noSuchName）';
+    if(kind === 'auth_rejected') return '认证失败且不返回任何数据';
+    if(kind === 'client_error') return '客户端侧拒绝（clientError）';
+    if(kind === 'no_crash') return '进程不崩溃';
+    if(kind === 'varbind_count'){
+      var parts = [];
+      if(spec.equal != null) parts.push('等于 ' + spec.equal);
+      if(spec.min != null) parts.push('>= ' + spec.min);
+      if(spec.max != null) parts.push('<= ' + spec.max);
+      return 'varbind 数量 ' + (parts.join(' 且 ') || '不限');
+    }
+    if(kind === 'value_type') return '值类型属于 ' + allowed;
+    if(kind === 'value_in') return '取值属于 ' + allowed;
+    if(kind === 'value_in_range') return '取值在 [' + spec.min + ', ' + spec.max + ']';
+    if(kind === 'value_length') return '值长度在 [' + spec.min + ', ' + spec.max + ']';
+    if(kind === 'value_equals') return '取值等于 ' + spec.value;
+    if(kind === 'oid_equals') return '返回 OID 等于 ' + spec.oid;
+    if(kind === 'oid_gt') return '返回 OID 大于 ' + spec.oid;
+    if(kind === 'oid_ge') return '返回 OID 不小于 ' + spec.oid;
+    if(kind === 'oid_prefix') return '首个 OID 以 ' + spec.prefix + ' 开头';
+    if(kind === 'oid_order') return '返回 OID 严格递增';
+    if(kind === 'trap_received') return '收到 trap / inform';
+    if(kind === 'trap_pdu_type') return 'PDU 类型 = ' + spec.expected;
+    if(kind === 'trap_version') return '版本 = ' + spec.expected;
+    if(kind === 'trap_oid_in') return 'trap OID 属于 ' + allowed;
+    if(kind === 'trap_enterprise') return 'enterprise = ' + spec.expected;
+    if(kind === 'trap_community') return 'community = ' + spec.expected;
+    if(kind === 'trap_security_name') return 'securityName = ' + spec.expected;
+    if(kind === 'trap_severity') return '严重级别 = ' + spec.expected;
+    if(kind === 'trap_ack') return 'inform 已被接收方确认';
+    if(kind === 'trap_latency') return '延迟 <= ' + spec.max_s + 's';
+    if(kind === 'trap_varbinds') return '包含指定 varbind（' + (spec.expected || []).length + ' 个）';
+    if(kind === 'trap_source') return '来源包含 ' + spec.expected;
+    return kind;
+  }
+
+  function renderCases(list){
+    if(!list.length){ $('viewerCases').innerHTML = '<div class="viewer-empty">没有匹配的用例</div>'; return; }
+    $('viewerCases').innerHTML = list.map(function(c){
+      var exp = c.expectation || {};
+      var assertions = exp.assertions || [];
+      var detail = '<div class="row-detail hidden">'+
+        (c.description ? '<div class="detail-line"><span class="detail-key">描述</span><span class="detail-value">'+esc(c.description)+'</span></div>' : '')+
+        '<div class="detail-line"><span class="detail-key">判定条件</span><span class="detail-value">'+
+        (assertions.length
+          ? '<ul class="assert-list">'+assertions.map(function(a){ return '<li>'+esc(describeAssertion(a))+'</li>'; }).join('')+'</ul>'
+          : '<span class="muted">无断言</span>')+
+        '</span></div>'+
+        (exp.skip ? '<div class="detail-line"><span class="detail-key">跳过</span><span class="detail-value">'+esc(exp.reason || '设计性跳过')+'</span></div>' : '')+
+        '</div>';
+      return '<div class="row-item expandable">'+
+        '<div class="row-main"><span class="row-name">'+esc(c.name)+'</span><code>'+esc(c.case_id)+'</code>'+
+        '<span class="caret">▾</span></div>'+
+        '<div class="row-meta">'+
+        '<span class="pill">'+esc(c.operation)+'</span>'+
+        '<span class="pill">'+esc(c.category)+'</span>'+
+        (c.version?'<span class="pill">'+esc(c.version)+'</span>':'')+
+        '<code>'+esc(c.oid)+'</code>'+
+        (c.module?'<span class="muted">'+esc(c.module)+'</span>':'')+
+        '</div>'+ detail +'</div>';
+    }).join('');
+  }
+
+  $('viewerClose').addEventListener('click', closeViewer);
+  $('viewerBackdrop').addEventListener('click', closeViewer);
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeViewer(); });
+  document.querySelectorAll('.viewer-tabs button').forEach(function(b){
+    b.addEventListener('click', function(){ setViewerTab(this.dataset.view); });
+  });
+  $('viewerQuery').addEventListener('input', function(){
+    viewerState.query = this.value.trim();
+    clearTimeout(viewerState.timer);
+    viewerState.timer = setTimeout(function(){ viewerState.offset = 0; loadViewer(); }, 300);
+  });
+  $('viewerFilterA').addEventListener('change', function(){
+    viewerState.filterA = this.value; viewerState.offset = 0; loadViewer();
+  });
+  $('viewerFilterB').addEventListener('change', function(){
+    viewerState.filterB = this.value; viewerState.offset = 0; loadViewer();
+  });
+  $('viewerPrev').addEventListener('click', function(){
+    viewerState.offset = Math.max(0, viewerState.offset - viewerState.limit); loadViewer();
+  });
+  $('viewerNext').addEventListener('click', function(){
+    viewerState.offset += viewerState.limit; loadViewer();
+  });
+  $('mibBody').addEventListener('click', function(e){
+    var btn = e.target.closest('button[data-action]');
+    if(!btn) return;
+    if(btn.dataset.action === 'view'){ openViewer(btn.dataset.mibId, btn.dataset.filename); }
+    else { $('mibId').value = btn.dataset.mibId; }
+  });
+  $('viewerCases').addEventListener('click', function(e){
+    var main = e.target.closest('.row-main');
+    var item = main && main.closest('.row-item.expandable');
+    if(!item) return;
+    var detail = item.querySelector('.row-detail');
+    if(!detail) return;
+    detail.classList.toggle('hidden');
+    item.classList.toggle('open');
+  });
+
   function statusCell(s){
     var cls = s==='done'?'ok':(s==='failed'?'fail':(s==='running'||s==='queued'?'warn':'muted'));
     return '<span class="status status--'+cls+'">'+esc(s)+'</span>';
@@ -418,7 +685,10 @@
           return '<tr><td><code>'+esc(m.mib_id)+'</code></td><td>'+esc(m.filename)+'<br><span class="muted">'+esc(m.module_name)+'</span></td>'+
             '<td>'+m.node_count+' / '+m.case_count+'<br><span class="muted">告警 '+m.warning_count+'</span></td>'+
             '<td><code>'+esc(m.root_oid)+'</code></td>'+
-            '<td><button class="btn btn--ghost btn--sm" onclick="document.getElementById(\'mibId\').value=\''+esc(m.mib_id)+'\'">选用</button></td></tr>';
+            '<td class="actions">'+
+            '<button class="btn btn--ghost btn--sm" data-action="use" data-mib-id="'+esc(m.mib_id)+'">选用</button>'+
+            '<button class="btn btn--ghost btn--sm" data-action="view" data-mib-id="'+esc(m.mib_id)+'" data-filename="'+esc(m.filename)+'">查看</button>'+
+            '</td></tr>';
         }).join('');
       }).catch(function(e){ toast('加载 MIB 失败: '+e.message, true); });
       api('/api/jobs').then(function(d){

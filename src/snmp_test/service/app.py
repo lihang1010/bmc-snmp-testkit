@@ -11,6 +11,7 @@ Design constraints implemented here:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 from contextlib import asynccontextmanager
@@ -236,16 +237,81 @@ def create_app(
         except MibError as exc:
             raise HTTPException(404, str(exc)) from exc
 
+    @app.get("/api/mibs/{mib_id}/nodes")
+    async def get_nodes(
+        mib_id: str,
+        request: Request,
+        q: str = "",
+        kind: str = "",
+        access: str = "",
+        limit: int = 50,
+        offset: int = 0,
+    ):
+        require(request)
+        try:
+            model = json.loads(library.model_path(mib_id).read_text(encoding="utf-8"))
+        except MibError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (OSError, ValueError) as exc:
+            raise HTTPException(500, f"model.json 读取失败: {exc}") from exc
+        needle = q.strip().lower()
+        matched = [
+            node
+            for node in (model.get("nodes") or [])
+            if (not kind or node.get("kind") == kind)
+            and (not access or node.get("access") == access)
+            and (
+                not needle
+                or needle in str(node.get("name", "")).lower()
+                or needle in str(node.get("oid", ""))
+            )
+        ]
+        limit = max(1, min(limit, 200))
+        offset = max(0, offset)
+        return {
+            "total": len(matched),
+            "offset": offset,
+            "limit": limit,
+            "nodes": matched[offset: offset + limit],
+        }
+
     @app.get("/api/mibs/{mib_id}/cases")
-    async def get_cases(mib_id: str, request: Request, limit: int = 20):
+    async def get_cases(
+        mib_id: str,
+        request: Request,
+        q: str = "",
+        operation: str = "",
+        category: str = "",
+        module: str = "",
+        limit: int = 50,
+        offset: int = 0,
+    ):
         require(request)
         try:
             cases = library.load_cases(mib_id).cases
         except MibError as exc:
             raise HTTPException(404, str(exc)) from exc
+        needle = q.strip().lower()
+        matched = [
+            case
+            for case in cases
+            if (not operation or case.operation == operation)
+            and (not category or case.category == category)
+            and (not module or case.module == module)
+            and (
+                not needle
+                or needle in str(case.name).lower()
+                or needle in str(case.oid)
+                or needle in str(case.case_id).lower()
+            )
+        ]
+        limit = max(1, min(limit, 200))
+        offset = max(0, offset)
         return {
-            "total": len(cases),
-            "sample": [c.to_dict() for c in cases[: max(1, min(limit, 100))]],
+            "total": len(matched),
+            "offset": offset,
+            "limit": limit,
+            "cases": [case.to_dict() for case in matched[offset: offset + limit]],
         }
 
     # ------------------------------------------------------------- jobs

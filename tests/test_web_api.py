@@ -258,6 +258,45 @@ def test_dev_bypass_skips_login(tmp_path, monkeypatch):
         assert client.get("/api/session").json()["user"] == "dev@localhost"
 
 
+def test_node_and_case_inspection(web):
+    client, _, _, alice, _ = web
+    mib_id = client.get("/api/mibs", headers=_headers(alice)).json()["mibs"][0]["mib_id"]
+
+    nodes = client.get(f"/api/mibs/{mib_id}/nodes", headers=_headers(alice), params={"limit": 5}).json()
+    assert nodes["total"] > 1000 and len(nodes["nodes"]) == 5
+    assert {"name", "oid", "kind", "access"} <= set(nodes["nodes"][0])
+
+    filtered = client.get(
+        f"/api/mibs/{mib_id}/nodes", headers=_headers(alice),
+        params={"q": "temperature", "limit": 50},
+    ).json()
+    assert 0 < filtered["total"] < nodes["total"]
+    assert all(
+        "temperature" in n["name"].lower() or "temperature" in n["oid"] for n in filtered["nodes"]
+    )
+
+    columns = client.get(
+        f"/api/mibs/{mib_id}/nodes", headers=_headers(alice), params={"kind": "column", "limit": 3},
+    ).json()
+    assert columns["nodes"] and all(n["kind"] == "column" for n in columns["nodes"])
+
+    cases = client.get(
+        f"/api/mibs/{mib_id}/cases", headers=_headers(alice),
+        params={"operation": "GET", "limit": 5},
+    ).json()
+    assert cases["total"] > 100 and len(cases["cases"]) == 5
+    assert all(c["operation"] == "GET" for c in cases["cases"])
+
+    page2 = client.get(
+        f"/api/mibs/{mib_id}/cases", headers=_headers(alice),
+        params={"operation": "GET", "limit": 5, "offset": 5},
+    ).json()
+    assert {c["case_id"] for c in page2["cases"]} != {c["case_id"] for c in cases["cases"]}
+
+    with _no_cookie(client):
+        assert client.get(f"/api/mibs/{mib_id}/nodes").status_code == 401
+
+
 def test_index_page_and_capabilities(web):
     client, _, _, alice, _ = web
     page = client.get("/", headers=_headers(alice))
