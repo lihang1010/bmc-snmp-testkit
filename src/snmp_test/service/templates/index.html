@@ -61,7 +61,7 @@
   .user-panel-email{margin-top:4px;font-size:12.5px;font-weight:600;word-break:break-all}
   .user-panel-logout{width:100%}
 
-  .wrap{max-width:1440px;margin:0 auto;padding:22px clamp(18px,4vw,40px) 64px}
+  .wrap{max-width:1760px;margin:0 auto;padding:20px clamp(14px,2.2vw,28px) 56px}
   .status-bar{
     display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:20px;
     padding:11px 16px;background:var(--surface);border:1px solid var(--line);
@@ -130,6 +130,8 @@
   .btn--primary:hover:not(:disabled){box-shadow:0 8px 22px rgba(14,165,233,.34);filter:brightness(1.04)}
   .btn--ghost,.secondary{color:var(--text);background:var(--surface);border-color:var(--line)}
   .btn--ghost:hover:not(:disabled),.secondary:hover{background:var(--surface-2);border-color:#cbd5e1}
+  .btn--danger{color:var(--fail);background:transparent;border-color:#fecaca}
+  .btn--danger:hover:not(:disabled){background:#fef2f2;border-color:#fca5a5}
   .btn--sm{height:28px;padding:0 11px;font-size:11px;border-radius:7px}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .row>.field{flex:1 1 150px;min-width:0}
@@ -237,6 +239,20 @@
   #viewerRange{font-size:11.5px;color:var(--muted)}
   .viewer-foot>div{display:flex;gap:8px}
   @media(max-width:620px){.viewer-panel{width:100vw}.viewer-toolbar select{flex:0 0 100px}}
+  .modal{position:fixed;inset:0;z-index:70;display:grid;place-items:center;padding:20px}
+  .modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.42);backdrop-filter:blur(3px)}
+  .modal-card{position:relative;width:min(420px,100%);padding:24px;background:var(--surface);
+    border:1px solid var(--line);border-radius:14px;box-shadow:0 24px 60px rgba(15,23,42,.2);
+    animation:modal-in .18s ease-out}
+  @keyframes modal-in{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+  .modal-icon{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;
+    font-weight:800;font-size:18px;color:#b91c1c;background:#fef2f2;border:1px solid #fee2e2;margin-bottom:14px}
+  .modal-title{font-size:15px;font-weight:700;margin-bottom:6px}
+  .modal-text{font-size:12.5px;color:var(--muted);line-height:1.7;word-break:break-word}
+  .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+  .btn--danger-solid{color:#fff;background:linear-gradient(135deg,#ef4444,#dc2626);
+    box-shadow:0 6px 16px rgba(220,38,38,.24)}
+  .btn--danger-solid:hover:not(:disabled){box-shadow:0 8px 22px rgba(220,38,38,.32);filter:brightness(1.04)}
   #toast{
     position:fixed;right:24px;bottom:24px;z-index:50;display:none;
     max-width:min(420px,calc(100vw - 48px));
@@ -343,8 +359,8 @@
       <div class="card">
         <div class="card-head"><span class="card-idx">04</span><h2>任务队列</h2><span class="pill">仅显示我的任务</span></div>
         <div class="table-scroll">
-          <table><thead><tr><th>任务</th><th>用户 / MIB</th><th>目标</th><th>状态</th><th>结果</th><th>报告</th></tr></thead>
-          <tbody id="jobBody"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody></table>
+          <table><thead><tr><th>任务</th><th>用户 / MIB</th><th>目标</th><th>状态</th><th>结果</th><th>报告</th><th>操作</th></tr></thead>
+          <tbody id="jobBody"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody></table>
         </div>
       </div>
     </section>
@@ -382,6 +398,18 @@
     </footer>
   </aside>
 </div>
+<div id="confirmDialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+  <div class="modal-backdrop" id="confirmBackdrop"></div>
+  <div class="modal-card">
+    <div class="modal-icon">!</div>
+    <div class="modal-title" id="confirmTitle">确认删除</div>
+    <div class="modal-text" id="confirmText"></div>
+    <div class="modal-actions">
+      <button class="btn btn--ghost" id="confirmCancel" type="button">取消</button>
+      <button class="btn btn--danger-solid" id="confirmOk" type="button">删除</button>
+    </div>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -404,6 +432,7 @@
 
   // account dropdown
   function closeUserMenu(){
+    if(!$('confirmDialog').classList.contains('hidden')) return;
     $('userPanel').classList.add('hidden');
     $('userBtn').setAttribute('aria-expanded','false');
   }
@@ -482,7 +511,10 @@
     $('viewer').classList.remove('hidden');
     setViewerTab('nodes');
   }
-  function closeViewer(){ $('viewer').classList.add('hidden'); }
+  function closeViewer(){
+    if(!$('confirmDialog').classList.contains('hidden')) return;
+    $('viewer').classList.add('hidden');
+  }
 
   function setViewerTab(tab){
     viewerState.tab = tab; viewerState.offset = 0;
@@ -644,8 +676,42 @@
   $('mibBody').addEventListener('click', function(e){
     var btn = e.target.closest('button[data-action]');
     if(!btn) return;
-    if(btn.dataset.action === 'view'){ openViewer(btn.dataset.mibId, btn.dataset.filename); }
-    else { $('mibId').value = btn.dataset.mibId; }
+    var mibId = btn.dataset.mibId;
+    if(btn.dataset.action === 'view'){
+      openViewer(mibId, btn.dataset.filename);
+    } else if(btn.dataset.action === 'delete-mib'){
+      askConfirm({
+        title: '删除 MIB',
+        message: '将删除「'+(btn.dataset.filename || mibId)+'」及其模型与用例，此操作不可恢复。',
+        confirmText: '删除'
+      }).then(function(ok){
+        if(!ok) return;
+        api('/api/mibs/'+mibId, {method:'DELETE'})
+          .then(function(){
+            toast('已删除 MIB '+mibId);
+            if(viewerState.mibId === mibId) closeViewer();
+            refresh();
+          })
+          .catch(function(err){ toast('删除失败: '+err.message, true); });
+      });
+    } else {
+      $('mibId').value = mibId;
+    }
+  });
+  $('jobBody').addEventListener('click', function(e){
+    var btn = e.target.closest('button[data-action=delete-job]');
+    if(!btn || btn.disabled) return;
+    var jobId = btn.dataset.jobId;
+    askConfirm({
+      title: '删除任务',
+      message: '将删除任务 '+jobId+' 及其报告目录，此操作不可恢复。',
+      confirmText: '删除'
+    }).then(function(ok){
+      if(!ok) return;
+      api('/api/jobs/'+jobId, {method:'DELETE'})
+        .then(function(){ toast('已删除任务 '+jobId); refresh(); })
+        .catch(function(err){ toast('删除失败: '+err.message, true); });
+    });
   });
   $('viewerCases').addEventListener('click', function(e){
     var main = e.target.closest('.row-main');
@@ -655,6 +721,31 @@
     if(!detail) return;
     detail.classList.toggle('hidden');
     item.classList.toggle('open');
+  });
+
+  // ---- confirm dialog ----
+  var confirmResolver = null;
+  function askConfirm(opts){
+    opts = opts || {};
+    $('confirmTitle').textContent = opts.title || '确认操作';
+    $('confirmText').textContent = opts.message || '';
+    $('confirmOk').textContent = opts.confirmText || '确定';
+    $('confirmDialog').classList.remove('hidden');
+    $('confirmCancel').focus();
+    return new Promise(function(resolve){ confirmResolver = resolve; });
+  }
+  function closeConfirm(result){
+    $('confirmDialog').classList.add('hidden');
+    var resolve = confirmResolver;
+    confirmResolver = null;
+    if(resolve) resolve(result);
+  }
+  $('confirmCancel').addEventListener('click', function(){ closeConfirm(false); });
+  $('confirmBackdrop').addEventListener('click', function(){ closeConfirm(false); });
+  $('confirmOk').addEventListener('click', function(){ closeConfirm(true); });
+  document.addEventListener('keydown', function(e){
+    if(e.key !== 'Escape') return;
+    if(!$('confirmDialog').classList.contains('hidden')) closeConfirm(false);
   });
 
   function statusCell(s){
@@ -688,11 +779,12 @@
             '<td class="actions">'+
             '<button class="btn btn--ghost btn--sm" data-action="use" data-mib-id="'+esc(m.mib_id)+'">选用</button>'+
             '<button class="btn btn--ghost btn--sm" data-action="view" data-mib-id="'+esc(m.mib_id)+'" data-filename="'+esc(m.filename)+'">查看</button>'+
+            '<button class="btn btn--danger btn--sm" data-action="delete-mib" data-mib-id="'+esc(m.mib_id)+'" data-filename="'+esc(m.filename)+'">删除</button>'+
             '</td></tr>';
         }).join('');
       }).catch(function(e){ toast('加载 MIB 失败: '+e.message, true); });
       api('/api/jobs').then(function(d){
-        if(!d.jobs.length){ $('jobBody').innerHTML='<tr><td colspan="6" class="muted">暂无任务</td></tr>'; return; }
+        if(!d.jobs.length){ $('jobBody').innerHTML='<tr><td colspan="7" class="muted">暂无任务</td></tr>'; return; }
         var pending=false;
         $('jobBody').innerHTML=d.jobs.map(function(j){
           if(j.status==='queued'||j.status==='running') pending=true;
@@ -705,10 +797,13 @@
           var report = j.run_id
             ? '<a class="link-btn" href="/runs/'+esc(j.run_id)+'/report.html" target="_blank">HTML</a> <a class="link-btn" href="/runs/'+esc(j.run_id)+'/results.json" target="_blank">JSON</a>'
             : '<span class="muted">—</span>';
+          var canDelete = j.status === 'done' || j.status === 'failed';
+          var actions = '<button class="btn btn--danger btn--sm" data-action="delete-job" data-job-id="'+esc(j.job_id)+'"'+(canDelete?'':' disabled')+'>删除</button>';
           return '<tr><td><code>'+esc(j.job_id)+'</code><br><span class="muted">'+esc(j.mode)+' / '+esc(j.version)+' / '+j.limit+'</span></td>'+
             '<td>'+esc(j.user)+'<br><span class="muted"><code>'+esc(j.mib_id)+'</code></span></td>'+
             '<td>'+esc(j.target_host)+':'+j.target_port+'</td>'+
-            '<td>'+statusCell(j.status)+'</td><td>'+result+'</td><td>'+report+'</td></tr>';
+            '<td>'+statusCell(j.status)+'</td><td>'+result+'</td><td>'+report+'</td>'+
+            '<td class="actions">'+actions+'</td></tr>';
         }).join('');
         if(pending) setTimeout(refresh, 2000);
       }).catch(function(e){ toast('加载任务失败: '+e.message, true); });

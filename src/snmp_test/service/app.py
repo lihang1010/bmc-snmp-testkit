@@ -314,6 +314,22 @@ def create_app(
             "cases": [case.to_dict() for case in matched[offset: offset + limit]],
         }
 
+    @app.delete("/api/mibs/{mib_id}")
+    async def delete_mib(mib_id: str, request: Request):
+        user = require(request, "write")
+        try:
+            record = library.get(mib_id)
+        except MibError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        await run_in_threadpool(library.delete, mib_id)
+        store.audit_log({
+            "event": "mib_deleted",
+            "user": user.email,
+            "mib_id": mib_id,
+            "filename": record.filename,
+        })
+        return {"deleted": mib_id}
+
     # ------------------------------------------------------------- jobs
     @app.post("/api/jobs")
     async def create_job(payload: JobRequest, request: Request):
@@ -369,6 +385,18 @@ def create_app(
         if job is None or job.user != user.email:
             raise HTTPException(404, "job not found")
         return job.public_dict()
+
+    @app.delete("/api/jobs/{job_id}")
+    async def delete_job(job_id: str, request: Request):
+        user = require(request, "write")
+        job = store.get(job_id)
+        if job is None or job.user != user.email:
+            raise HTTPException(404, "job not found")
+        if job.status in ("queued", "running"):
+            raise HTTPException(409, "任务正在执行，无法删除")
+        await run_in_threadpool(store.delete, job_id)
+        store.audit_log({"event": "job_deleted", "user": user.email, "job_id": job_id})
+        return {"deleted": job_id}
 
     # ------------------------------------------------------------- reports
     @app.get("/runs/{run_id}/report.html")

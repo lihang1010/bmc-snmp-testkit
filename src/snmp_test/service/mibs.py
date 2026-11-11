@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -147,6 +148,14 @@ class MibLibrary:
 
     def list(self) -> list[MibRecord]:
         return sorted(self._records.values(), key=lambda r: r.uploaded_at, reverse=True)
+
+    def delete(self, mib_id: str) -> MibRecord:
+        """Remove one MIB, its model and generated cases from disk."""
+        with self._lock:
+            record = self.get(mib_id)
+            shutil.rmtree(self._dir(mib_id), ignore_errors=True)
+            self._records.pop(mib_id, None)
+            return record
 
     def mib_path(self, mib_id: str) -> Path:
         record = self.get(mib_id)

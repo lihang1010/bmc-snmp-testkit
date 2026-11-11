@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import time
 import traceback
 import uuid
@@ -75,7 +76,8 @@ class Job:
 
 class JobStore:
     def __init__(self, root: str | Path) -> None:
-        self.base = Path(root) / "work" / "jobs"
+        self.root = Path(root)
+        self.base = self.root / "work" / "jobs"
         self.base.mkdir(parents=True, exist_ok=True)
         self.journal = self.base / "jobs.jsonl"
         self.audit = self.base / "audit.jsonl"
@@ -132,6 +134,28 @@ class JobStore:
 
     def update(self, job: Job) -> None:
         self._append(job)
+
+    def delete(self, job_id: str) -> Job:
+        """Drop one job, rewrite the journal and remove its run directory."""
+        job = self._jobs.pop(job_id, None)
+        if job is None:
+            raise KeyError(job_id)
+        self._rewrite()
+        for run_id in {job.run_id, f"web-{job_id}"}:
+            if not run_id:
+                continue
+            folder = self.root / "runs" / run_id
+            if folder.is_dir():
+                shutil.rmtree(folder, ignore_errors=True)
+        return job
+
+    def _rewrite(self) -> None:
+        """Persist only the current jobs (the journal is append-only otherwise)."""
+        tmp = self.journal.with_suffix(".jsonl.tmp")
+        with tmp.open("w", encoding="utf-8") as fh:
+            for job in sorted(self._jobs.values(), key=lambda j: j.created_at):
+                fh.write(json.dumps(job.public_dict(), ensure_ascii=False, default=str) + "\n")
+        tmp.replace(self.journal)
 
     def audit_log(self, entry: dict[str, Any]) -> None:
         with self.audit.open("a", encoding="utf-8") as fh:

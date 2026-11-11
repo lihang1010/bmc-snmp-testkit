@@ -305,3 +305,36 @@ def test_index_page_and_capabilities(web):
     assert cap["readonly_only"] is True
     assert cap["allowed_operations"] == ["GET"]
     assert cap["mib_count"] >= 2
+
+
+def test_delete_mib_and_job(tmp_path):
+    root = tmp_path / "cleanup"
+    app = _make_app(root)
+    with TestClient(app) as client:
+        alice = _register(client, "del-alice@example.com")
+        bob = _register(client, "del-bob@example.com")
+
+        upload_headers = {**_headers(alice), "X-MIB-Filename": "cleanup.mib"}
+        mib_id = client.post("/api/mibs", content=MIB_BYTES, headers=upload_headers).json()["mib"]["mib_id"]
+        assert mib_id in {m["mib_id"] for m in client.get("/api/mibs", headers=_headers(alice)).json()["mibs"]}
+
+        # the MIB library is shared, so any signed-in account may delete it
+        assert client.delete(f"/api/mibs/{mib_id}", headers=_headers(bob)).status_code == 200
+        assert mib_id not in {m["mib_id"] for m in client.get("/api/mibs", headers=_headers(bob)).json()["mibs"]}
+        assert client.delete(f"/api/mibs/{mib_id}", headers=_headers(bob)).status_code == 404
+
+        # re-upload and finish one job so it can be removed with its report
+        mib_id = client.post("/api/mibs", content=MIB_BYTES, headers=upload_headers).json()["mib"]["mib_id"]
+        payload = {"mib_id": mib_id, "mode": "mock", "target_host": "127.0.0.1",
+                   "target_port": 11811, "version": "v1", "limit": 2}
+        job_id = client.post("/api/jobs", json=payload, headers=_headers(alice)).json()["job"]["job_id"]
+        job = _wait_done(client, job_id, alice)
+        assert job["status"] == "done"
+        run_id = job["run_id"]
+        assert (root / "runs" / run_id).is_dir()
+
+        # jobs are private: another account gets 404 instead of deleting it
+        assert client.delete(f"/api/jobs/{job_id}", headers=_headers(bob)).status_code == 404
+        assert client.delete(f"/api/jobs/{job_id}", headers=_headers(alice)).status_code == 200
+        assert client.get(f"/api/jobs/{job_id}", headers=_headers(alice)).status_code == 404
+        assert not (root / "runs" / run_id).exists()
