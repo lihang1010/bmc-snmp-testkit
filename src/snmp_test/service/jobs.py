@@ -121,6 +121,11 @@ class JobStore:
     def list(self, limit: int = 50) -> list[Job]:
         return sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)[:limit]
 
+    def list_for(self, user: str, limit: int = 50) -> list[Job]:
+        """Only the jobs owned by ``user`` -- the queue is private per account."""
+        items = [j for j in self._jobs.values() if j.user == user]
+        return sorted(items, key=lambda j: j.created_at, reverse=True)[:limit]
+
     def _append(self, job: Job) -> None:
         with self.journal.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(job.public_dict(), ensure_ascii=False, default=str) + "\n")

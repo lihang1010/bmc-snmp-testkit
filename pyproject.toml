@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "pysnmp==7.1.21",
     "pyasn1==0.6.5",
+    "cryptography>=44.0.1",
     "pytest==9.1.1",
     "PyYAML==6.0.3",
     "Jinja2==3.1.6",

@@ -1,28 +1,24 @@
-# Web 服务配置模板。复制为 config/web.yaml 后按需修改；该文件不要提交含明文 token 的版本。
-# 未创建 config/web.yaml 时，服务以「开发模式」启动：控制台打印一次性 admin token，
-# live 关闭、目标白名单为空（即完全不能连真实设备）。
+# Web 服务配置模板。复制为 config/web.yaml 后按需修改；含明文凭据的版本不要提交。
+#
+# 账号体系（参数内置，不在此文件配置）：
+#   注册：邮箱 + 邮箱验证码 + 密码（至少 8 位）
+#   登录：密码登录，或邮箱验证码登录
+#   权限：所有注册账号完全一致（无角色区分）
+#   数据：work/auth.db（SQLite：用户、验证码、会话）
+#   邮件：SMTP 通过环境变量配置，未配置时验证码写入 work/mail-dev.log
+#         并直接显示在登录页（开发模式）
+#
+#   SNMP_TEST_SMTP_HOST / SNMP_TEST_SMTP_PORT / SNMP_TEST_SMTP_USER
+#   SNMP_TEST_SMTP_PASSWORD / SNMP_TEST_SMTP_FROM / SNMP_TEST_SMTP_TLS
 
-# 每用户一个 token 与角色。viewer=只看，operator=可上传 MIB/提交任务，admin=额外可发起 live。
-auth:
-  users:
-    - name: alice
-      token: ${ALICE_TOKEN}
-      role: operator
-    - name: bob
-      token: ${BOB_TOKEN}
-      role: viewer
-    # - name: ops-admin
-    #   token: ${ADMIN_TOKEN}
-    #   role: admin
-
-# 服务级安全策略。readonly_only 由代码硬性置为 true，不受此处影响。
-# 只有显式把 allow_live 打开、并在 allowed_targets 列出 IP，admin 才能发起 live 只读 GET。
+# 服务级安全策略（与账号权限无关，只决定能否连接真实设备）。
 security:
   allow_live: false
   allowed_targets: []
   # - 192.0.2.10
 
 # 说明：
-#  - 目标端口、SNMP 版本、团体字 / v3 凭据由每次任务提交时在内存中传入，绝不写入本文件。
-#  - 任务串行执行（单 worker），模拟 Agent 用 11811、trap 监听用 11812，避免与 CLI/test 的 11611/11711 冲突。
-#  - 报告输出到 runs/web-<job_id>/，仅已认证用户可访问。
+#  - MIB 库所有账号共享；任务队列按账号隔离，只能看到自己的任务与报告。
+#  - 目标端口、SNMP 版本、团体字 / v3 凭据在任务提交时内存传入，不写入本文件。
+#  - 串行执行（单 worker），模拟 Agent 用 11811、trap 监听 11812。
+#  - 报告输出到 runs/web-<job_id>/，仅任务所有者可访问。

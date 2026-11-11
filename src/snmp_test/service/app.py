@@ -19,12 +19,12 @@ from typing import Any
 
 import yaml
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from snmp_test.security import AuthStore, User
+from snmp_test.service.auth import AuthError, AuthService, SESSION_TTL_SECONDS, User
 from snmp_test.service.jobs import JobRunner, JobStore
 from snmp_test.service.mibs import MibError, MibLibrary
 
@@ -46,6 +46,24 @@ class JobRequest(BaseModel):
     modules: list[str] = Field(default_factory=list)
     limit: int = 20
     credential: dict[str, Any] = Field(default_factory=dict)
+
+
+class CodeRequest(BaseModel):
+    email: str
+    purpose: str = "login"
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    code: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str | None = None
+    code: str | None = None
+    method: str = "password"
 
 
 def _web_security(config_path: Path) -> dict[str, Any]:
@@ -70,7 +88,7 @@ def create_app(
     workspace = Path(root) if root else ROOT
     cfg_path = Path(config_path) if config_path else workspace / "config" / "web.yaml"
     security_cfg = _web_security(cfg_path)
-    auth = AuthStore.load(cfg_path)
+    auth = AuthService(workspace / "work" / "auth.db")
     library = MibLibrary(workspace, workspace / "config" / "safety-policy.yaml")
     store = JobStore(workspace)
     runner = JobRunner(workspace, library, store, config_path=cfg_path, web_security=security_cfg)
@@ -79,7 +97,6 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await runner.start()
-        app.state.dev_token = auth.dev_token
         yield
         await runner.stop()
 
@@ -100,50 +117,81 @@ def create_app(
     def require(request: Request, action: str = "read") -> User:
         user = auth.authenticate(_token(request))
         if user is None:
-            raise HTTPException(401, "未认证：请提供 Bearer token 或先建立会话")
+            raise HTTPException(401, "未登录：请先登录")
         if not user.can(action):
-            raise HTTPException(403, f"角色 {user.role!r} 无权执行此操作（需要 {action}）")
+            raise HTTPException(403, f"当前账号无权执行该操作（需要 {action}）")
         return user
 
-    def find_run(run_id: str):
+    def find_run(run_id: str, user: User):
         if not RUN_ID_RE.match(run_id):
             raise HTTPException(400, "invalid run_id")
-        for job in store.list(500):
+        for job in store.list_for(user.email, 500):
             if job.run_id == run_id:
                 return job
         raise HTTPException(404, "run not found")
 
-    # ------------------------------------------------------------- session
+    def set_session(response: Response, token: str) -> None:
+        response.set_cookie(COOKIE, token, httponly=True, samesite="lax", max_age=SESSION_TTL_SECONDS)
+
+    # ------------------------------------------------------------- auth
     @app.get("/health")
     async def health():
         return {"status": "ok", "readonly": True, "workers": 1}
 
-    @app.post("/api/session")
-    async def create_session(request: Request):
-        body = await request.json()
-        user = auth.authenticate(str(body.get("token") or ""))
-        if user is None:
-            raise HTTPException(401, "invalid token")
-        response = JSONResponse({"user": user.name, "role": user.role})
-        response.set_cookie(COOKIE, user.token, httponly=True, samesite="lax")
+    @app.post("/api/auth/code")
+    async def auth_send_code(payload: CodeRequest):
+        try:
+            return auth.send_code(payload.email, payload.purpose)
+        except AuthError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/auth/register")
+    async def auth_register(payload: RegisterRequest):
+        try:
+            token, user = auth.register(payload.email, payload.code, payload.password)
+        except AuthError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        response = JSONResponse({"user": user.email})
+        set_session(response, token)
         return response
 
-    @app.get("/api/session")
-    async def get_session(request: Request):
-        user = require(request)
-        return {"user": user.name, "role": user.role}
+    @app.post("/api/auth/login")
+    async def auth_login(payload: LoginRequest):
+        try:
+            if payload.method == "code":
+                token, user = auth.login_code(payload.email, payload.code or "")
+            else:
+                token, user = auth.login_password(payload.email, payload.password or "")
+        except AuthError as exc:
+            raise HTTPException(401, str(exc)) from exc
+        response = JSONResponse({"user": user.email})
+        set_session(response, token)
+        return response
 
-    @app.delete("/api/session")
-    async def delete_session():
+    @app.post("/api/auth/logout")
+    async def auth_logout(request: Request):
+        auth.logout(_token(request))
         response = JSONResponse({"logged_out": True})
         response.delete_cookie(COOKIE)
         return response
 
+    @app.get("/api/auth/me")
+    async def auth_me(request: Request):
+        user = require(request)
+        return {"user": user.email, "email": user.email, "role": user.role}
+
+    # Kept for the console page's polling code.
+    @app.get("/api/session")
+    async def get_session(request: Request):
+        user = require(request)
+        return {"user": user.email, "role": user.role}
+
     # ------------------------------------------------------------- config
     @app.get("/api/config")
     async def get_config(request: Request):
-        require(request)
+        user = require(request)
         return {
+            "user": user.email,
             "readonly_only": True,
             "allowed_operations": ["GET"],
             "live_enabled": bool(security_cfg.get("allow_live", False)),
@@ -154,7 +202,7 @@ def create_app(
             "queue_length": runner.pending(),
             "current_job": runner.current,
             "mib_count": len(library.list()),
-            "job_count": len(store.list(500)),
+            "job_count": len(store.list_for(user.email, 500)),
         }
 
     # ------------------------------------------------------------- mibs
@@ -165,13 +213,13 @@ def create_app(
         content = await request.body()
         try:
             record = await run_in_threadpool(
-                library.add, filename, content, uploaded_by=user.name
+                library.add, filename, content, uploaded_by=user.email
             )
         except MibError as exc:
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
             raise HTTPException(422, f"MIB 解析失败: {exc}") from exc
-        store.audit_log({"event": "mib_upload", "user": user.name, "mib_id": record.mib_id,
+        store.audit_log({"event": "mib_upload", "user": user.email, "mib_id": record.mib_id,
                          "filename": record.filename, "sha256": record.sha256})
         return {"mib": record.to_dict(), "cases_path": f"/api/mibs/{record.mib_id}/cases"}
 
@@ -220,8 +268,6 @@ def create_app(
         except MibError as exc:
             raise HTTPException(404, str(exc)) from exc
         if payload.mode == "live":
-            if not user.can("live"):
-                raise HTTPException(403, "live 模式需要 admin 角色")
             if not security_cfg.get("allow_live"):
                 raise HTTPException(403, "服务端未开启 security.allow_live")
             allowed = set(security_cfg.get("allowed_targets") or [])
@@ -247,22 +293,22 @@ def create_app(
 
     @app.get("/api/jobs")
     async def list_jobs(request: Request, limit: int = 50):
-        require(request)
-        return {"jobs": [j.public_dict() for j in store.list(min(limit, 200))]}
+        user = require(request)
+        return {"jobs": [j.public_dict() for j in store.list_for(user.email, min(limit, 200))]}
 
     @app.get("/api/jobs/{job_id}")
     async def get_job(job_id: str, request: Request):
-        require(request)
+        user = require(request)
         job = store.get(job_id)
-        if job is None:
+        if job is None or job.user != user.email:
             raise HTTPException(404, "job not found")
         return job.public_dict()
 
     # ------------------------------------------------------------- reports
     @app.get("/runs/{run_id}/report.html")
     async def report_html(run_id: str, request: Request):
-        require(request)
-        find_run(run_id)
+        user = require(request)
+        find_run(run_id, user)
         path = workspace / "runs" / run_id / "report.html"
         if not path.is_file():
             raise HTTPException(404, "report not generated yet")
@@ -270,8 +316,8 @@ def create_app(
 
     @app.get("/runs/{run_id}/results.json")
     async def report_json(run_id: str, request: Request):
-        require(request)
-        find_run(run_id)
+        user = require(request)
+        find_run(run_id, user)
         path = workspace / "runs" / run_id / "results.json"
         if not path.is_file():
             raise HTTPException(404, "results not generated yet")
@@ -279,14 +325,24 @@ def create_app(
 
     @app.get("/api/runs/{run_id}/files")
     async def run_files(run_id: str, request: Request):
-        require(request)
-        find_run(run_id)
+        user = require(request)
+        find_run(run_id, user)
         folder = workspace / "runs" / run_id
         return {"files": sorted(p.name for p in folder.iterdir() if p.is_file())}
 
     # ------------------------------------------------------------- ui
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_page(request: Request):
+        if auth.authenticate(_token(request)) is not None:
+            return RedirectResponse("/", status_code=302)
+        return templates.TemplateResponse(
+            request, "login.html", {"title": "登录 · bmc-snmp-testkit"}
+        )
+
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
+        if auth.authenticate(_token(request)) is None:
+            return RedirectResponse("/login", status_code=302)
         return templates.TemplateResponse(
             request, "index.html", {"title": "bmc-snmp-testkit · 只读测试服务"}
         )
@@ -312,9 +368,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.root or args.config:
         global app
         app = create_app(root=args.root, config_path=args.config)
-    token = AuthStore.load(Path(args.config) if args.config else ROOT / "config" / "web.yaml").dev_token
-    if token:
-        print(f"[snmp-test-web] 开发模式临时 admin token: {token}", flush=True)
+    if os.environ.get("SNMP_TEST_DEV_BYPASS", "").strip().lower() in ("1", "true", "yes", "on"):
+        print("[snmp-test-web] 开发旁路已启用：跳过登录（仅本地调试）", flush=True)
+    if not os.environ.get("SNMP_TEST_SMTP_HOST", "").strip():
+        print("[snmp-test-web] 未配置 SMTP：验证码写入 work/mail-dev.log 并显示在登录页", flush=True)
     print(f"[snmp-test-web] 监听 http://{args.host}:{args.port}（只读服务，SET 已禁用）", flush=True)
     import uvicorn
 

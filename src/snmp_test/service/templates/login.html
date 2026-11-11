@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  :root{
+    --bg:#f4f7fb;--surface:#ffffff;--surface-2:#f8fafc;--field:#f8fafc;
+    --line:#e2e8f0;--line-soft:#eef2f7;
+    --text:#0f172a;--muted:#64748b;--faint:#94a3b8;
+    --accent:#0284c7;--ok:#059669;--warn:#d97706;--fail:#dc2626;
+    --shadow:0 24px 64px rgba(15,23,42,.10),0 2px 6px rgba(15,23,42,.04);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;min-height:100vh;display:grid;place-items:center;padding:24px 16px;
+    color:var(--text);font:14px/1.6 "Inter",ui-sans-serif,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:
+      radial-gradient(760px 520px at 18% -10%,rgba(2,132,199,.08),transparent 62%),
+      radial-gradient(700px 460px at 88% 8%,rgba(8,145,178,.05),transparent 64%),
+      var(--bg);
+  }
+  .auth-card{
+    width:100%;max-width:420px;padding:30px 28px 26px;
+    background:var(--surface);border:1px solid var(--line);border-radius:16px;
+    box-shadow:var(--shadow);
+  }
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+  .brand-mark{
+    width:42px;height:42px;flex:0 0 42px;border-radius:12px;display:grid;place-items:center;
+    font-weight:800;font-size:12px;letter-spacing:.08em;color:#fff;
+    background:linear-gradient(135deg,#0ea5e9,#06b6d4);box-shadow:0 8px 20px rgba(14,165,233,.28);
+  }
+  h1{font-size:17px;margin:0;font-weight:700}
+  .sub{color:var(--muted);font-size:11.5px;margin-top:2px}
+  .tabs{
+    display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px;
+    background:var(--surface-2);border:1px solid var(--line);border-radius:10px;margin-bottom:20px;
+  }
+  .tabs button{
+    height:32px;border:0;border-radius:7px;background:transparent;color:var(--muted);
+    font:inherit;font-size:12px;font-weight:650;cursor:pointer;transition:background .16s,color .16s;
+  }
+  .tabs button.active{background:#fff;color:var(--accent);box-shadow:0 1px 2px rgba(15,23,42,.08),inset 0 0 0 1px #bae6fd}
+  label{display:block;color:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.03em;margin:12px 0 6px}
+  label:first-of-type{margin-top:0}
+  input{
+    width:100%;height:40px;padding:0 12px;font:inherit;font-size:13px;
+    color:var(--text);background:#fff;border:1px solid var(--line);border-radius:9px;outline:none;
+    transition:border-color .18s,box-shadow .18s,background .18s;
+  }
+  input::placeholder{color:#a3b1c6}
+  input:hover{border-color:#cbd5e1}
+  input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(2,132,199,.12);background:#fff}
+  .row{display:flex;gap:9px}
+  .row>input{flex:1 1 auto;min-width:0}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;height:40px;padding:0 16px;
+    border:1px solid transparent;border-radius:9px;font:inherit;font-size:12.5px;font-weight:650;
+    cursor:pointer;white-space:nowrap;transition:transform .12s,box-shadow .18s,background .18s,opacity .18s;
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  .btn--primary{
+    width:100%;margin-top:20px;color:#fff;
+    background:linear-gradient(135deg,#0ea5e9,#06b6d4);box-shadow:0 6px 16px rgba(14,165,233,.24);
+  }
+  .btn--primary:hover:not(:disabled){box-shadow:0 8px 22px rgba(14,165,233,.34);filter:brightness(1.04)}
+  .btn--ghost{color:var(--text);background:var(--surface);border-color:var(--line);flex:0 0 auto;font-size:11.5px;padding:0 12px}
+  .btn--ghost:hover:not(:disabled){background:var(--surface-2);border-color:#cbd5e1}
+  .hint{margin-top:16px;padding:10px 12px;border-radius:9px;font-size:11.5px;line-height:1.6;
+    border:1px solid var(--line-soft);background:var(--surface-2);color:var(--muted)}
+  .hint.dev{border-color:#fde68a;background:#fffbeb;color:#92400e}
+  .hint.dev b{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;letter-spacing:.14em;color:#b45309}
+  .hidden{display:none !important}
+  #toast{
+    position:fixed;right:20px;bottom:20px;z-index:50;display:none;max-width:min(380px,calc(100vw - 40px));
+    padding:11px 14px;border-radius:10px;background:#fff;border:1px solid var(--line);
+    border-left:3px solid var(--accent);box-shadow:0 18px 40px rgba(15,23,42,.16);font-size:12.5px;
+    animation:toast-in .22s ease-out;
+  }
+  #toast.bad{border-left-color:var(--fail)}
+  @keyframes toast-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .foot{margin-top:18px;text-align:center;color:var(--faint);font-size:11px}
+</style>
+</head>
+<body>
+  <main class="auth-card">
+    <div class="brand">
+      <div class="brand-mark">SN</div>
+      <div>
+        <h1>bmc-snmp-testkit</h1>
+        <div class="sub">BMC SNMP 只读测试服务</div>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button type="button" data-tab="password" class="active">密码登录</button>
+      <button type="button" data-tab="code">验证码登录</button>
+      <button type="button" data-tab="register">注册</button>
+    </div>
+
+    <section id="panel-password" class="panel">
+      <label for="p-email">邮箱</label>
+      <input id="p-email" type="email" autocomplete="username" placeholder="name@example.com">
+      <label for="p-password">密码</label>
+      <input id="p-password" type="password" autocomplete="current-password" placeholder="请输入密码">
+      <button id="p-submit" class="btn btn--primary">登录</button>
+    </section>
+
+    <section id="panel-code" class="panel hidden">
+      <label for="c-email">邮箱</label>
+      <input id="c-email" type="email" autocomplete="username" placeholder="name@example.com">
+      <label for="c-code">邮箱验证码</label>
+      <div class="row">
+        <input id="c-code" inputmode="numeric" maxlength="6" placeholder="6 位数字">
+        <button id="c-send" class="btn btn--ghost">发送验证码</button>
+      </div>
+      <button id="c-submit" class="btn btn--primary">登录</button>
+    </section>
+
+    <section id="panel-register" class="panel hidden">
+      <label for="r-email">邮箱</label>
+      <input id="r-email" type="email" autocomplete="username" placeholder="name@example.com">
+      <label for="r-code">邮箱验证码</label>
+      <div class="row">
+        <input id="r-code" inputmode="numeric" maxlength="6" placeholder="6 位数字">
+        <button id="r-send" class="btn btn--ghost">发送验证码</button>
+      </div>
+      <label for="r-password">设置密码（至少 8 位）</label>
+      <input id="r-password" type="password" autocomplete="new-password" placeholder="不少于 8 位">
+      <label for="r-password2">确认密码</label>
+      <input id="r-password2" type="password" autocomplete="new-password" placeholder="再次输入密码">
+      <button id="r-submit" class="btn btn--primary">注册并登录</button>
+    </section>
+
+    <div id="devHint" class="hint dev hidden"></div>
+    <div class="foot">注册即表示同意本服务仅用于只读 SNMP 测试</div>
+  </main>
+  <div id="toast"></div>
+
+<script>
+(function(){
+  var $ = function(id){return document.getElementById(id)};
+  var toastTimer = null;
+  function toast(msg, bad){
+    var t=$('toast'); t.textContent=msg; t.className = bad ? 'bad' : '';
+    t.style.display='block'; clearTimeout(toastTimer);
+    toastTimer=setTimeout(function(){t.style.display='none'}, 4200);
+  }
+  function api(path, opts){
+    opts = opts || {};
+    opts.credentials = 'same-origin';
+    opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
+    return fetch(path, opts).then(function(r){
+      return r.json().catch(function(){return {}}).then(function(d){
+        if(!r.ok){ throw new Error((d && d.detail) || ('HTTP '+r.status)); }
+        return d;
+      });
+    });
+  }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]}); }
+
+  var currentTab = 'password';
+  function showTab(name){
+    currentTab = name;
+    ['password','code','register'].forEach(function(t){
+      var btn = document.querySelector('.tabs button[data-tab="'+t+'"]');
+      btn.classList.toggle('active', t===name);
+      $('panel-'+t).classList.toggle('hidden', t!==name);
+    });
+    // carry the email across panels so users don't retype it
+    var src = currentTab==='password' ? $('p-email').value
+            : currentTab==='code' ? $('c-email').value : $('r-email').value;
+    if(!src) return;
+    ['p-email','c-email','r-email'].forEach(function(id){
+      if(!$(id).value) $(id).value = src;
+    });
+  }
+  document.querySelectorAll('.tabs button').forEach(function(btn){
+    btn.addEventListener('click', function(){ showTab(this.dataset.tab); });
+  });
+
+  function showDevCode(d){
+    if(d && d.dev_code){
+      $('devHint').classList.remove('hidden');
+      $('devHint').innerHTML = '开发模式（未配置 SMTP）：本次验证码为 <b>'+esc(d.dev_code)+'</b>，已自动填入。';
+      if(currentTab==='register'){ $('r-code').value = d.dev_code; }
+      else { $('c-code').value = d.dev_code; }
+    } else {
+      $('devHint').classList.add('hidden');
+    }
+  }
+
+  function startCooldown(btn, seconds){
+    var left = seconds || 60;
+    btn.disabled = true;
+    var original = btn.dataset.label || btn.textContent;
+    btn.dataset.label = original;
+    btn.textContent = left + 's';
+    var timer = setInterval(function(){
+      left -= 1;
+      if(left <= 0){ clearInterval(timer); btn.disabled=false; btn.textContent=original; return; }
+      btn.textContent = left + 's';
+    }, 1000);
+  }
+
+  function sendCode(emailId, btnId, purpose){
+    var email = $(emailId).value.trim();
+    if(!email){ toast('请先填写邮箱', true); return; }
+    var btn = $(btnId);
+    btn.disabled = true;
+    api('/api/auth/code', {method:'POST', body: JSON.stringify({email:email, purpose:purpose})})
+      .then(function(d){
+        showDevCode(d);
+        toast(d.sent ? '验证码已发送到邮箱' : '开发模式：验证码已显示在下方');
+        startCooldown(btn, d.cooldown || 60);
+      })
+      .catch(function(e){ toast(e.message, true); btn.disabled=false; });
+  }
+  $('c-send').addEventListener('click', function(){ sendCode('c-email','c-send','login'); });
+  $('r-send').addEventListener('click', function(){ sendCode('r-email','r-send','register'); });
+
+  function afterLogin(d){
+    toast('登录成功，正在进入控制台…');
+    setTimeout(function(){ location.href='/'; }, 320);
+  }
+
+  $('p-submit').addEventListener('click', function(){
+    var email=$('p-email').value.trim(), password=$('p-password').value;
+    if(!email || !password){ toast('请填写邮箱和密码', true); return; }
+    this.disabled = true;
+    var btn=this;
+    api('/api/auth/login',{method:'POST',body:JSON.stringify({email:email,password:password,method:'password'})})
+      .then(afterLogin)
+      .catch(function(e){ toast(e.message, true); })
+      .finally(function(){ btn.disabled=false; });
+  });
+
+  $('c-submit').addEventListener('click', function(){
+    var email=$('c-email').value.trim(), code=$('c-code').value.trim();
+    if(!email || !code){ toast('请填写邮箱和验证码', true); return; }
+    var btn=this; btn.disabled = true;
+    api('/api/auth/login',{method:'POST',body:JSON.stringify({email:email,code:code,method:'code'})})
+      .then(afterLogin)
+      .catch(function(e){ toast(e.message, true); })
+      .finally(function(){ btn.disabled=false; });
+  });
+
+  $('r-submit').addEventListener('click', function(){
+    var email=$('r-email').value.trim(), code=$('r-code').value.trim();
+    var pwd=$('r-password').value, pwd2=$('r-password2').value;
+    if(!email || !code || !pwd){ toast('请填写邮箱、验证码和密码', true); return; }
+    if(pwd.length < 8){ toast('密码至少需要 8 位', true); return; }
+    if(pwd !== pwd2){ toast('两次输入的密码不一致', true); return; }
+    var btn=this; btn.disabled = true;
+    api('/api/auth/register',{method:'POST',body:JSON.stringify({email:email,code:code,password:pwd})})
+      .then(afterLogin)
+      .catch(function(e){ toast(e.message, true); })
+      .finally(function(){ btn.disabled=false; });
+  });
+
+  // Enter submits the visible panel
+  document.addEventListener('keydown', function(e){
+    if(e.key !== 'Enter') return;
+    if(currentTab==='password') $('p-submit').click();
+    else if(currentTab==='code') $('c-submit').click();
+    else $('r-submit').click();
+  });
+
+})();
+</script>
+</body>
+</html>

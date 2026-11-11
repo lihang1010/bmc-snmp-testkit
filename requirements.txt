@@ -2,6 +2,10 @@
 # pysnmp 7.x 为维护中的 asyncio API 分支；4.4.x 需改用 pyasn1==0.4.8 且 API 不同。
 pysnmp==7.1.21
 pyasn1==0.6.5
+# pysnmp 7.x 把 DES/3DES/AES 加密后端拆成可选依赖 cryptography，未声明在运行时依赖里；
+# 缺少它时 SNMPv3 authPriv 会报 "Ciphering services not available"，所有 v3 用例失败。
+# 用最低版本约束（pysnmp dev extra 基线），让各 Python 版本自行选择兼容 wheel。
+cryptography>=44.0.1
 pytest==9.1.1
 PyYAML==6.0.3
 Jinja2==3.1.6

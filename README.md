@@ -156,27 +156,31 @@ docs/how-it-works.md          # 白盒说明（实际跑起来发生了什么、
 
 示例报告位于 `runs/<run_id>/report.html`（每次全量运行生成，例如仓库内的 `runs/full-*` 目录）；若目录被清理，重新执行 `python -m snmp_test.cli run` 即可生成。
 
-## 7. Web 服务（多人 / 只读 / 多 MIB）
+## 7. Web 服务（邮箱账号 / 只读 / 多 MIB）
 
 面向多人分发的只读 Web 控制台，复用同一套解析、用例、执行与报告内核。
 
 ```powershell
 python -m pip install -r requirements.txt
-# 编辑 config/web.yaml（从 config/web.example.yaml 复制），为每人分配 token 与角色
-$env:ALICE_TOKEN = "..."   # 模板中用环境变量注入
+# 可选：编辑 config/web.yaml（从 config/web.example.yaml 复制）调整 live 白名单
 python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 # 若已执行 pip install -e .，也可直接用： snmp-test-web --host 0.0.0.0 --port 8080
-# 未配置 web.yaml 时进入开发模式：控制台打印一次性 admin token
 ```
 
-浏览器打开 `http://<服务地址>:8080`，输入 token 后即可上传各自项目的 MIB、提交只读任务、查看/下载报告。
+浏览器打开 `http://<服务地址>:8080`，未登录会跳转到 `/login`：
 
-**能力**：每人上传自己的 MIB（按 SHA-256 内容寻址隔离，自动生成专属模型与用例仓库）、提交 `mock` 或 `live` 的只读 GET 任务、串行队列执行、任务列表与通过率、报告 HTML/JSON 分发、按用户审计日志。
+- **注册**：邮箱 + 邮箱验证码 + 密码（至少 8 位），注册成功自动登录；
+- **登录**：密码登录，或邮箱验证码登录；
+- **权限**：所有注册账号完全一致，没有角色区分；
+- **MIB 库共享**：所有账号看到同一份 MIB 列表，都能上传，按内容哈希去重；
+- **任务队列隔离**：每个账号只能看到自己的任务、报告和通过率。
+
+**邮件配置**：设置 `SNMP_TEST_SMTP_HOST`、`SNMP_TEST_SMTP_PORT`、`SNMP_TEST_SMTP_USER`、`SNMP_TEST_SMTP_PASSWORD`、`SNMP_TEST_SMTP_FROM`（可选 `SNMP_TEST_SMTP_TLS` / `SNMP_TEST_SMTP_SSL`）后真发邮件。未配置时进入开发模式：验证码写入 `work/mail-dev.log` 并直接显示在登录页。账号、验证码与会话保存在 `work/auth.db`（SQLite），密码用 PBKDF2-HMAC-SHA256 加盐存储，会话为服务端随机 token + HttpOnly Cookie（默认 7 天）。
 
 **安全默认值**（不可通过 API 覆盖）：
 
 - 服务级 `readonly_only = true`：只允许 GET；SET、`--allow-guarded`、错误凭据探测、flood 用例均不可达。
-- `live` 需同时满足：admin 角色 + `config/web.yaml` 中 `security.allow_live: true` + 目标 IP 在 `security.allowed_targets` 白名单内。默认全部关闭。
+- `live` 仍受服务端控制：需要 `config/web.yaml` 中 `security.allow_live: true`，且目标 IP 在 `security.allowed_targets` 白名单内。这与账号权限无关，默认全部关闭。
 - live 确认闸口已下沉到 `Runtime`（`security.py`），Python API 调用者无法绕过；CLI 仍要求 `--allow-live`。
 - 团体字 / v3 密钥只在任务提交时经内存注入，不写入任何配置或任务文件；日志、报告、快照全部脱敏。
 - 单 worker 串行执行：避免 trap 监听端口冲突与多用户同时打同一台 BMC。模拟 Agent 用 `11811`、trap 监听 `11812`（与 CLI `11611/11612`、测试 `11711/11712` 错开）。
@@ -185,16 +189,21 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/session` | 用 token 建立 HttpOnly 会话 |
+| GET | `/login` | 登录 / 注册页面（已登录时跳转 `/`） |
+| POST | `/api/auth/code` | 发送邮箱验证码（`purpose`: `register` / `login`） |
+| POST | `/api/auth/register` | 邮箱 + 验证码 + 密码注册，成功即建会话 |
+| POST | `/api/auth/login` | 登录（`method`: `password` / `code`） |
+| POST | `/api/auth/logout` | 退出并清除会话 |
+| GET | `/api/auth/me` | 当前账号 |
 | GET | `/api/config` | 服务能力、白名单、队列状态 |
-| POST | `/api/mibs` | 上传 MIB（原始字节 + `X-MIB-Filename`） |
-| GET | `/api/mibs` / `/api/mibs/{id}/cases` | MIB 列表 / 用例样本 |
-| POST | `/api/jobs` | 提交只读任务 |
-| GET | `/api/jobs` / `/api/jobs/{id}` | 任务列表 / 状态 |
-| GET | `/runs/{run_id}/report.html` | 带鉴权的报告 |
-| GET | `/runs/{run_id}/results.json` | 机器可读结果 |
+| POST | `/api/mibs` | 上传 MIB（原始字节 + `X-MIB-Filename`），所有账号共享 |
+| GET | `/api/mibs` / `/api/mibs/{id}/cases` | MIB 列表 / 用例样本（共享） |
+| POST | `/api/jobs` | 提交只读任务（归属当前账号） |
+| GET | `/api/jobs` / `/api/jobs/{id}` | 仅返回自己的任务 |
+| GET | `/runs/{run_id}/report.html` | 报告，仅任务所有者可访问 |
+| GET | `/runs/{run_id}/results.json` | 机器可读结果，仅任务所有者可访问 |
 
-> 这是 MVP：token/RBAC 是轻量占位实现，生产应替换为 OIDC/LDAP；trap/inform 与 SET 暂不通过 Web 开放。详见 `docs/how-it-works.md` 第 11 节。
+> `SNMP_TEST_DEV_BYPASS=1` 可跳过登录，仅用于本地调试。trap/inform 与 SET 暂不通过 Web 开放。详见 `docs/how-it-works.md` 第 11 节。
 
 ## 8. 常见问题
 

@@ -5,111 +5,303 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ title }}</title>
 <style>
-  :root{--bg:#0f172a;--card:#1e293b;--line:#334155;--text:#e2e8f0;--muted:#94a3b8;--ok:#22c55e;--fail:#ef4444;--warn:#f59e0b;--accent:#38bdf8}
+  :root{
+    --bg:#f4f7fb;--surface:#ffffff;--surface-2:#f8fafc;--field:#f8fafc;
+    --line:#e2e8f0;--line-soft:#eef2f7;
+    --text:#0f172a;--muted:#64748b;--faint:#94a3b8;
+    --accent:#0284c7;--accent-2:#0891b2;
+    --ok:#059669;--warn:#d97706;--fail:#dc2626;
+    --radius:14px;--shadow:0 1px 2px rgba(15,23,42,.04),0 10px 30px rgba(15,23,42,.06);
+  }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 "Segoe UI",system-ui,-apple-system,"Microsoft YaHei",sans-serif}
-  header{padding:20px 28px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,#0f172a,#1e293b);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
-  h1{font-size:20px;margin:0}
-  .sub{color:var(--muted);font-size:12px;margin-top:2px}
-  .wrap{max-width:1400px;margin:0 auto;padding:22px 28px 60px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
-  h2{font-size:15px;margin:0 0 12px;padding-left:9px;border-left:3px solid var(--accent)}
-  label{display:block;color:var(--muted);font-size:12px;margin:8px 0 4px}
-  input,select,textarea,button{font:inherit;border-radius:6px;border:1px solid var(--line);padding:8px 10px;background:#0b1220;color:var(--text);width:100%}
-  button{cursor:pointer;background:var(--accent);color:#06121f;border:none;font-weight:600;width:auto;padding:8px 16px}
-  button.secondary{background:transparent;color:var(--text);border:1px solid var(--line)}
-  button:hover{filter:brightness(1.1)}
-  .row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
-  .row>*{flex:1;min-width:110px}
-  .row>button{flex:0 0 auto}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
-  th{color:var(--muted);font-weight:600}
-  tr:last-child td{border-bottom:none}
-  code{color:var(--accent);font-size:12px}
-  .pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;border:1px solid var(--line);color:var(--muted)}
+  body{
+    margin:0;min-height:100vh;color:var(--text);
+    font:14px/1.6 "Inter",ui-sans-serif,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    font-variant-numeric:tabular-nums;
+    background:
+      radial-gradient(900px 520px at 8% -12%,rgba(2,132,199,.07),transparent 60%),
+      radial-gradient(700px 460px at 96% -6%,rgba(8,145,178,.05),transparent 62%),
+      var(--bg);
+    background-attachment:fixed;
+  }
+  .topbar{
+    position:sticky;top:0;z-index:20;
+    display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
+    padding:14px clamp(18px,4vw,40px);
+    background:rgba(255,255,255,.86);backdrop-filter:blur(14px);
+    border-bottom:1px solid var(--line);
+  }
+  .brand{display:flex;align-items:center;gap:14px}
+  .brand-mark{
+    width:40px;height:40px;flex:0 0 40px;border-radius:12px;
+    display:grid;place-items:center;font-weight:800;font-size:12px;letter-spacing:.08em;
+    color:#fff;background:linear-gradient(135deg,#0ea5e9,#06b6d4);
+    box-shadow:0 6px 18px rgba(14,165,233,.28);
+  }
+  h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.02em}
+  .sub{color:var(--muted);font-size:11.5px;margin-top:2px;letter-spacing:.02em}
+
+  .user-menu{position:relative}
+  .user-box{
+    display:flex;align-items:center;gap:8px;min-height:36px;
+    padding:6px 12px;border:1px solid var(--line);border-radius:10px;
+    background:var(--surface);color:var(--text);font:inherit;font-size:12px;cursor:pointer;
+    transition:background .16s,border-color .16s;
+  }
+  .user-box:hover{background:var(--surface-2);border-color:#cbd5e1}
+  .user-email{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+  .chev{color:var(--faint);font-size:10px}
+  .user-panel{
+    position:absolute;right:0;top:calc(100% + 8px);width:252px;padding:14px;
+    background:var(--surface);border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 18px 44px rgba(15,23,42,.14);z-index:30;
+  }
+  .user-panel-head{padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--line-soft)}
+  .user-panel-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .user-panel-email{margin-top:4px;font-size:12.5px;font-weight:600;word-break:break-all}
+  .user-panel-logout{width:100%}
+
+  .wrap{max-width:1440px;margin:0 auto;padding:22px clamp(18px,4vw,40px) 64px}
+  .status-bar{
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:20px;
+    padding:11px 16px;background:var(--surface);border:1px solid var(--line);
+    border-radius:12px;box-shadow:var(--shadow);
+  }
+  .status-bar-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);white-space:nowrap}
+  .cap-list{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;font-size:11.5px;color:var(--muted)}
+  .cap-item{font-size:11.5px;color:var(--faint);white-space:nowrap}
+  .cap-item b{color:var(--text);font-weight:650}
+  .cap-item b.ok{color:var(--ok)}
+
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:stretch}
+  .col{display:flex;flex-direction:column;gap:20px;min-width:0}
+  .col--full{grid-column:1 / -1}
+  .card--grow{flex:1 1 auto;display:flex;flex-direction:column}
+  .card--grow .table-scroll{flex:1 1 auto}
+  .card{
+    position:relative;min-width:0;background:var(--surface);border:1px solid var(--line);
+    border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow);
+  }
+  .card::before{
+    content:"";position:absolute;left:22px;right:22px;top:0;height:1px;
+    background:linear-gradient(90deg,transparent,rgba(2,132,199,.35),transparent);
+  }
+  .card-head{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+  .card-head .pill{margin-left:auto}
+  .card-idx{
+    font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--accent);
+    border:1px solid #bae6fd;background:#f0f9ff;border-radius:6px;padding:2px 6px;
+  }
+  h2{font-size:14px;margin:0;font-weight:650;letter-spacing:.02em}
+  label{display:block;color:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.03em;margin:12px 0 6px}
+  label:first-of-type{margin-top:0}
+  input,select{
+    width:100%;height:38px;padding:0 12px;font:inherit;font-size:13px;
+    color:var(--text);background:#fff;border:1px solid var(--line);
+    border-radius:9px;outline:none;
+    transition:border-color .18s,box-shadow .18s,background .18s;
+  }
+  input::placeholder{color:#a3b1c6}
+  input:hover,select:hover{border-color:#cbd5e1}
+  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(2,132,199,.12);background:#fff}
+  select{
+    appearance:none;padding-right:34px;cursor:pointer;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%2364748b' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 12px center;background-size:12px;
+  }
+  input[type=file]{height:auto;padding:0;background:transparent;border:1px dashed #cbd5e1;cursor:pointer}
+  input[type=file]::file-selector-button{
+    height:36px;margin-right:10px;padding:0 12px;border:0;border-right:1px solid var(--line);
+    background:#f0f9ff;color:var(--accent);font:inherit;font-size:12px;font-weight:600;cursor:pointer;
+  }
+  button{font:inherit;cursor:pointer}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    height:38px;padding:0 16px;border-radius:9px;font-size:12.5px;font-weight:650;
+    border:1px solid transparent;white-space:nowrap;
+    transition:transform .12s,box-shadow .18s,background .18s,border-color .18s,opacity .18s;
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  .btn--primary{
+    color:#fff;background:linear-gradient(135deg,#0ea5e9,#06b6d4);
+    box-shadow:0 6px 16px rgba(14,165,233,.24);
+  }
+  .btn--primary:hover:not(:disabled){box-shadow:0 8px 22px rgba(14,165,233,.34);filter:brightness(1.04)}
+  .btn--ghost,.secondary{color:var(--text);background:var(--surface);border-color:var(--line)}
+  .btn--ghost:hover:not(:disabled),.secondary:hover{background:var(--surface-2);border-color:#cbd5e1}
+  .btn--sm{height:28px;padding:0 11px;font-size:11px;border-radius:7px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .row>.field{flex:1 1 150px;min-width:0}
+  .row>input{flex:1 1 200px;min-width:0}
+  .row>.btn,.row>button{flex:0 0 auto}
+  .field>label{margin-top:0}
+  .form-actions{margin-top:auto;padding-top:16px;border-top:1px solid var(--line-soft);display:flex;justify-content:flex-end}
+  .note{
+    margin-top:14px;padding:10px 12px;border-radius:9px;
+    border:1px solid var(--line-soft);background:var(--surface-2);
+    color:var(--muted);font-size:11.5px;line-height:1.65;
+  }
+  .table-scroll{overflow-x:auto;margin:0 -4px;padding:0 4px}
+  table{width:100%;min-width:520px;border-collapse:separate;border-spacing:0;font-size:12.5px}
+  th{
+    padding:0 10px 10px;text-align:left;color:var(--faint);
+    font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    border-bottom:1px solid var(--line);white-space:nowrap;
+  }
+  td{padding:12px 10px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr{transition:background .15s}
+  tbody tr:hover{background:var(--surface-2)}
+  tbody td[colspan]{text-align:center;padding:26px 10px;color:var(--faint)}
+  td .muted{font-size:11px}
+  code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:11.5px;color:#0369a1;background:#f0f9ff;
+    border:1px solid #e0f2fe;border-radius:5px;padding:1px 5px;
+    white-space:nowrap;
+  }
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:650;
+    border:1px solid var(--line);color:var(--muted);background:var(--surface-2)}
   .ok{color:var(--ok)}.fail{color:var(--fail)}.warn{color:var(--warn)}.muted{color:var(--muted)}
-  .bar{height:5px;background:#0b1220;border-radius:3px;overflow:hidden;min-width:80px}
-  .bar>i{display:block;height:100%;background:var(--ok)}
-  .note{background:#0b1220;border:1px solid var(--line);border-radius:8px;padding:10px 12px;color:var(--muted);font-size:12px;margin-top:12px}
-  .gate{background:#241b1f;border:1px solid #7f1d1d;border-radius:8px;padding:10px 12px;font-size:12px;color:#fca5a5;margin-bottom:14px}
-  #toast{position:fixed;right:20px;bottom:20px;background:#1e293b;border:1px solid var(--line);border-radius:8px;padding:10px 14px;display:none;max-width:420px;z-index:10}
-  a{color:var(--accent)}
-  .hidden{display:none}
+  .status{
+    display:inline-flex;align-items:center;gap:5px;
+    padding:3px 9px;border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.04em;
+    border:1px solid transparent;white-space:nowrap;
+  }
+  .status::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
+  .status--ok{color:#047857;background:#ecfdf5;border-color:#d1fae5}
+  .status--fail{color:#b91c1c;background:#fef2f2;border-color:#fee2e2}
+  .status--warn{color:#b45309;background:#fffbeb;border-color:#fef3c7}
+  .status--muted{color:var(--muted);background:var(--surface-2);border-color:var(--line)}
+  .rate{font-weight:700;color:var(--ok);font-size:12px}
+  .rate span{font-size:11px;opacity:.75}
+  .rate--warn{color:var(--warn)}.rate--fail{color:var(--fail)}
+  .bar{height:6px;min-width:88px;background:#eef2f7;border:1px solid var(--line-soft);
+    border-radius:999px;overflow:hidden;margin-top:6px}
+  .bar>i{display:block;height:100%;border-radius:999px;
+    background:linear-gradient(90deg,#22d3ee,#10b981);transition:width .4s ease}
+  .bar--warn>i{background:linear-gradient(90deg,#fbbf24,#f59e0b)}
+  .bar--fail>i{background:linear-gradient(90deg,#fb7185,#ef4444)}
+  a{color:var(--accent);text-decoration:none}
+  .link-btn{
+    display:inline-flex;align-items:center;padding:3px 8px;margin:2px 4px 2px 0;
+    border:1px solid #bae6fd;border-radius:6px;
+    background:#f0f9ff;color:#0369a1;font-size:10.5px;font-weight:650;
+    transition:background .15s,border-color .15s;
+  }
+  .link-btn:hover{background:#e0f2fe;border-color:#7dd3fc}
+  #toast{
+    position:fixed;right:24px;bottom:24px;z-index:50;display:none;
+    max-width:min(420px,calc(100vw - 48px));
+    padding:12px 16px;border-radius:11px;
+    background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
+    box-shadow:0 18px 40px rgba(15,23,42,.16);color:var(--text);font-size:12.5px;
+    animation:toast-in .22s ease-out;
+  }
+  #toast.toast--bad{border-left-color:var(--fail)}
+  @keyframes toast-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .hidden{display:none !important}
+  @media(max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}.col--full{grid-column:auto}}
+  @media(max-width:620px){
+    .topbar{padding:12px 16px}
+    .sub{display:none}
+    .user-email{max-width:130px}
+    .wrap{padding:18px 14px 48px}
+    .card{padding:16px}
+    .row>*{flex:1 1 100%}
+    .row>.btn,.row>button{flex:1 1 auto}
+  }
 </style>
 </head>
 <body>
-<header>
-  <div><h1>bmc-snmp-testkit</h1><div class="sub">BMC SNMP 只读测试服务 · 多用户 · 每个项目独立 MIB · 串行任务 · 报告可追溯</div></div>
-  <div id="userBox" class="muted">未连接</div>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">SN</div>
+    <div>
+      <h1>bmc-snmp-testkit</h1>
+      <div class="sub">BMC SNMP 只读测试服务 · MIB 共享 · 任务隔离 · 报告可追溯</div>
+    </div>
+  </div>
+  <div class="user-menu">
+    <button id="userBtn" class="user-box" type="button" aria-haspopup="true" aria-expanded="false">
+      <span id="userBox" class="user-email">未登录</span>
+      <span class="pill">已登录</span>
+      <span class="chev">▾</span>
+    </button>
+    <div id="userPanel" class="user-panel hidden">
+      <div class="user-panel-head">
+        <div class="user-panel-label">当前账号</div>
+        <div id="userEmail" class="user-panel-email">—</div>
+      </div>
+      <button id="logoutBtn" class="btn btn--ghost btn--sm user-panel-logout">退出登录</button>
+    </div>
+  </div>
 </header>
 <div class="wrap">
 
-  <div id="gate" class="gate hidden"></div>
+  <div class="status-bar">
+    <span class="status-bar-label">服务状态</span>
+    <div id="cap" class="cap-list">正在读取服务能力…</div>
+  </div>
 
   <div class="grid">
-    <div>
+    <section class="col">
       <div class="card">
-        <h2>连接</h2>
-        <label>访问 Token（服务端按用户分发，不在页面存储）</label>
-        <div class="row">
-          <input id="token" type="password" placeholder="输入 token">
-          <button id="loginBtn">连接</button>
-          <button class="secondary" id="logoutBtn">退出</button>
-        </div>
-        <div class="note" id="cap">只读服务：仅允许 GET；SET、高危 OID、错误凭据探测均不可通过 API 触发。live 需 admin 角色且目标在服务端白名单内。</div>
-      </div>
-
-      <div class="card">
-        <h2>上传项目 MIB</h2>
-        <label>每个 MIB 按内容哈希独立存放，自动生成专属模型与用例仓库</label>
+        <div class="card-head"><span class="card-idx">01</span><h2>上传项目 MIB</h2></div>
+        <label for="mibFile">所有账号共享同一个 MIB 库，按内容哈希去重</label>
         <div class="row">
           <input id="mibFile" type="file" accept=".mib,.txt,.my">
-          <button id="uploadBtn">上传并解析</button>
+          <button id="uploadBtn" class="btn btn--primary">上传并解析</button>
         </div>
-        <div class="note">同名/同内容 MIB 自动去重；单文件上限 4 MB；MIB 内容上传后只读，不会被改写。</div>
+        <div class="note">单文件上限 4 MB · 原始内容只读保存，不会被改写 · 上传后所有账号可见</div>
       </div>
 
-      <div class="card">
-        <h2>MIB 列表</h2>
-        <table><thead><tr><th>ID</th><th>文件 / 模块</th><th>节点 / 用例</th><th>根 OID</th><th></th></tr></thead>
-        <tbody id="mibBody"><tr><td colspan="5" class="muted">连接后加载</td></tr></tbody></table>
+      <div class="card card--grow">
+        <div class="card-head"><span class="card-idx">02</span><h2>MIB 列表</h2></div>
+        <div class="table-scroll">
+          <table><thead><tr><th>ID</th><th>文件 / 模块</th><th>节点 / 用例</th><th>根 OID</th><th></th></tr></thead>
+          <tbody id="mibBody"><tr><td colspan="5" class="muted">加载中…</td></tr></tbody></table>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <div>
-      <div class="card">
-        <h2>提交只读任务</h2>
-        <label>模式</label>
-        <select id="mode"><option value="mock">mock（本地模拟 Agent，安全）</option><option value="live">live（真实 BMC，需 admin + 白名单）</option></select>
+    <section class="col">
+      <div class="card card--grow">
+        <div class="card-head"><span class="card-idx">03</span><h2>提交只读任务</h2><span class="pill">GET ONLY</span></div>
+        <label for="mode">模式</label>
+        <select id="mode"><option value="mock">mock（本地模拟 Agent，安全）</option><option value="live">live（真实 BMC，需服务端开启 live 白名单）</option></select>
         <div class="row">
-          <div><label>目标 IP</label><input id="host" value="127.0.0.1"></div>
-          <div><label>端口</label><input id="port" type="number" value="161"></div>
+          <div class="field"><label for="host">目标 IP</label><input id="host" value="127.0.0.1"></div>
+          <div class="field"><label for="port">端口</label><input id="port" type="number" value="161"></div>
         </div>
         <div class="row">
-          <div><label>SNMP 版本</label><select id="version"><option>v1</option><option>v2c</option><option>v3</option></select></div>
-          <div><label>用例上限</label><input id="limit" type="number" value="20" min="1" max="500"></div>
+          <div class="field"><label for="version">SNMP 版本</label><select id="version"><option>v1</option><option>v2c</option><option>v3</option></select></div>
+          <div class="field"><label for="limit">用例上限</label><input id="limit" type="number" value="20" min="1" max="500"></div>
         </div>
-        <label>MIB ID</label><input id="mibId" placeholder="从左侧列表选择或粘贴">
-        <label>模块过滤（可选，逗号分隔）</label><input id="modules" placeholder="serverSysInfo,serverStatus">
+        <label for="mibId">MIB ID</label><input id="mibId" placeholder="从左侧列表选择或粘贴">
+        <label for="modules">模块过滤（可选，逗号分隔）</label><input id="modules" placeholder="serverSysInfo,serverStatus">
         <div id="v1cred">
-          <label>团体字（仅在内存中使用，不落盘）</label><input id="community" type="password" placeholder="v1 / v2c community">
+          <label for="community">团体字（仅在内存中使用，不落盘）</label><input id="community" type="password" placeholder="v1 / v2c community">
         </div>
         <div id="v3cred" class="hidden">
-          <div class="row"><div><label>v3 用户</label><input id="v3user"></div><div><label>安全级别</label><select id="v3level"><option>authPriv</option><option>authNoPriv</option><option>noAuthNoPriv</option></select></div></div>
-          <div class="row"><div><label>认证协议</label><select id="v3auth"><option>SHA</option><option>MD5</option><option>SHA256</option><option>NONE</option></select></div><div><label>加密协议</label><select id="v3priv"><option>AES128</option><option>DES</option><option>AES256</option><option>NONE</option></select></div></div>
-          <div class="row"><div><label>认证密钥</label><input id="v3authkey" type="password"></div><div><label>加密密钥</label><input id="v3privkey" type="password"></div></div>
+          <div class="row"><div class="field"><label for="v3user">v3 用户</label><input id="v3user"></div><div class="field"><label for="v3level">安全级别</label><select id="v3level"><option>authPriv</option><option>authNoPriv</option><option>noAuthNoPriv</option></select></div></div>
+          <div class="row"><div class="field"><label for="v3auth">认证协议</label><select id="v3auth"><option>SHA</option><option>MD5</option><option>SHA256</option><option>NONE</option></select></div><div class="field"><label for="v3priv">加密协议</label><select id="v3priv"><option>AES128</option><option>DES</option><option>AES256</option><option>NONE</option></select></div></div>
+          <div class="row"><div class="field"><label for="v3authkey">认证密钥</label><input id="v3authkey" type="password"></div><div class="field"><label for="v3privkey">加密密钥</label><input id="v3privkey" type="password"></div></div>
         </div>
-        <div style="margin-top:14px"><button id="submitBtn">提交任务</button></div>
+        <div class="form-actions"><button id="submitBtn" class="btn btn--primary">提交任务</button></div>
       </div>
+    </section>
 
+    <section class="col col--full">
       <div class="card">
-        <h2>任务队列</h2>
-        <table><thead><tr><th>任务</th><th>用户 / MIB</th><th>目标</th><th>状态</th><th>结果</th><th>报告</th></tr></thead>
-        <tbody id="jobBody"><tr><td colspan="6" class="muted">连接后加载</td></tr></tbody></table>
+        <div class="card-head"><span class="card-idx">04</span><h2>任务队列</h2><span class="pill">仅显示我的任务</span></div>
+        <div class="table-scroll">
+          <table><thead><tr><th>任务</th><th>用户 / MIB</th><th>目标</th><th>状态</th><th>结果</th><th>报告</th></tr></thead>
+          <tbody id="jobBody"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody></table>
+        </div>
       </div>
-    </div>
+    </section>
   </div>
 </div>
 <div id="toast"></div>
@@ -119,7 +311,7 @@
   var $ = function(id){return document.getElementById(id)};
   var toastTimer = null;
   function toast(msg, bad){
-    var t=$('toast'); t.textContent=msg; t.style.borderColor = bad ? 'var(--fail)' : 'var(--line)';
+    var t=$('toast'); t.textContent=msg; t.className = bad ? 'toast--bad' : '';
     t.style.display='block'; clearTimeout(toastTimer); toastTimer=setTimeout(function(){t.style.display='none'}, 4200);
   }
   function api(path, opts){
@@ -132,22 +324,35 @@
   }
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]}); }
 
+  // account dropdown
+  function closeUserMenu(){
+    $('userPanel').classList.add('hidden');
+    $('userBtn').setAttribute('aria-expanded','false');
+  }
+  $('userBtn').addEventListener('click', function(e){
+    e.stopPropagation();
+    var panel = $('userPanel');
+    var open = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !open);
+    this.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  document.addEventListener('click', function(e){
+    if(!$('userPanel').classList.contains('hidden') && !e.target.closest('.user-menu')) closeUserMenu();
+  });
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape') closeUserMenu();
+  });
+
   $('version').addEventListener('change', function(){
     var v3 = this.value==='v3';
     $('v1cred').classList.toggle('hidden', v3);
     $('v3cred').classList.toggle('hidden', !v3);
   });
 
-  $('loginBtn').addEventListener('click', function(){
-    var token=$('token').value.trim();
-    if(!token){ toast('请输入 token', true); return; }
-    api('/api/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token})})
-      .then(function(d){ $('token').value=''; $('userBox').innerHTML='<span class="ok">'+esc(d.user)+'</span> <span class="pill">'+esc(d.role)+'</span>';
-        $('gate').classList.add('hidden'); refresh(); })
-      .catch(function(e){ toast('连接失败: '+e.message, true); });
-  });
   $('logoutBtn').addEventListener('click', function(){
-    api('/api/session',{method:'DELETE'}).then(function(){ $('userBox').textContent='未连接'; });
+    api('/api/auth/logout',{method:'POST'})
+      .catch(function(){})
+      .then(function(){ location.href='/login'; });
   });
 
   $('uploadBtn').addEventListener('click', function(){
@@ -187,25 +392,25 @@
 
   function statusCell(s){
     var cls = s==='done'?'ok':(s==='failed'?'fail':(s==='running'||s==='queued'?'warn':'muted'));
-    return '<span class="'+cls+'">'+esc(s)+'</span>';
+    return '<span class="status status--'+cls+'">'+esc(s)+'</span>';
   }
 
   function refresh(){
     api('/api/session').then(function(d){
-      $('userBox').innerHTML='<span class="ok">'+esc(d.user)+'</span> <span class="pill">'+esc(d.role)+'</span>';
-      $('gate').classList.add('hidden');
+      $('userBox').textContent = d.user;
+      $('userEmail').textContent = d.user;
     }).catch(function(){
-      $('gate').classList.remove('hidden');
-      $('gate').textContent='未认证或会话已过期：请输入服务端分发的 token 后点击「连接」。';
-      $('mibBody').innerHTML='<tr><td colspan="5" class="muted">未连接</td></tr>';
-      $('jobBody').innerHTML='<tr><td colspan="6" class="muted">未连接</td></tr>';
+      location.href='/login';
       return null;
     }).then(function(ok){
       if(ok===null) return;
       api('/api/config').then(function(c){
-        $('cap').textContent='只读服务：仅 GET；live_enabled='+c.live_enabled+
-          '；白名单='+(c.allowed_targets.length?c.allowed_targets.join(', '):'（空，禁止 live）')+
-          '；队列='+c.queue_length+'；MIB 数='+c.mib_count;
+        $('cap').innerHTML='<span class="cap-item">操作 <b>GET</b></span>'+
+          '<span class="cap-item">live <b class="'+(c.live_enabled?'ok':'muted')+'">'+esc(c.live_enabled)+'</b></span>'+
+          '<span class="cap-item">白名单 <b>'+esc(c.allowed_targets.length?c.allowed_targets.join(', '):'空')+'</b></span>'+
+          '<span class="cap-item">队列 <b>'+esc(c.queue_length)+'</b></span>'+
+          '<span class="cap-item">MIB <b>'+esc(c.mib_count)+'</b></span>'+
+          '<span class="cap-item">任务 <b>'+esc(c.job_count)+'</b></span>';
       }).catch(function(){});
       api('/api/mibs').then(function(d){
         if(!d.mibs.length){ $('mibBody').innerHTML='<tr><td colspan="5" class="muted">暂无 MIB，请先上传</td></tr>'; return; }
@@ -213,7 +418,7 @@
           return '<tr><td><code>'+esc(m.mib_id)+'</code></td><td>'+esc(m.filename)+'<br><span class="muted">'+esc(m.module_name)+'</span></td>'+
             '<td>'+m.node_count+' / '+m.case_count+'<br><span class="muted">告警 '+m.warning_count+'</span></td>'+
             '<td><code>'+esc(m.root_oid)+'</code></td>'+
-            '<td><button class="secondary" onclick="document.getElementById(\'mibId\').value=\''+esc(m.mib_id)+'\'">选用</button></td></tr>';
+            '<td><button class="btn btn--ghost btn--sm" onclick="document.getElementById(\'mibId\').value=\''+esc(m.mib_id)+'\'">选用</button></td></tr>';
         }).join('');
       }).catch(function(e){ toast('加载 MIB 失败: '+e.message, true); });
       api('/api/jobs').then(function(d){
@@ -221,11 +426,15 @@
         var pending=false;
         $('jobBody').innerHTML=d.jobs.map(function(j){
           if(j.status==='queued'||j.status==='running') pending=true;
-          var s=j.summary||{}, rate=s.effective_pass_rate;
+          var s=j.summary||{}, rate=s.effective_pass_rate==null?0:s.effective_pass_rate;
+          var tone = rate>=100 ? '' : (rate>=60 ? ' warn' : ' fail');
           var result = j.status==='done'
-            ? '<div>'+(s.passed||0)+'/'+(s.total||0)+' <span class="ok">'+rate+'%</span></div><div class="bar"><i style="width:'+rate+'%"></i></div>'
+            ? '<div class="rate'+(tone===' warn'?' rate--warn':(tone===' fail'?' rate--fail':''))+'">'+(s.passed||0)+'/'+(s.total||0)+' <span>'+rate+'%</span></div>'+
+              '<div class="bar'+(tone===' warn'?' bar--warn':(tone===' fail'?' bar--fail':''))+'"><i style="width:'+rate+'%"></i></div>'
             : '<span class="muted">'+esc(j.message||'-')+'</span>';
-          var report = j.run_id ? '<a href="/runs/'+esc(j.run_id)+'/report.html" target="_blank">HTML</a> · <a href="/runs/'+esc(j.run_id)+'/results.json" target="_blank">JSON</a>' : '-';
+          var report = j.run_id
+            ? '<a class="link-btn" href="/runs/'+esc(j.run_id)+'/report.html" target="_blank">HTML</a> <a class="link-btn" href="/runs/'+esc(j.run_id)+'/results.json" target="_blank">JSON</a>'
+            : '<span class="muted">—</span>';
           return '<tr><td><code>'+esc(j.job_id)+'</code><br><span class="muted">'+esc(j.mode)+' / '+esc(j.version)+' / '+j.limit+'</span></td>'+
             '<td>'+esc(j.user)+'<br><span class="muted"><code>'+esc(j.mib_id)+'</code></span></td>'+
             '<td>'+esc(j.target_host)+':'+j.target_port+'</td>'+
