@@ -447,3 +447,25 @@ def test_snmp_probe(web):
         "/api/snmp/audit?operation=SET", headers=_headers(alice),
     ).json()["entries"]
     assert filtered and all(e["operation"] == "SET" for e in filtered)
+
+
+def test_unified_audit_timeline(web):
+    client, _, _, alice, _ = web
+    page = client.get("/audit", headers=_headers(alice))
+    assert page.status_code == 200 and "操作记录" in page.text
+
+    entries = client.get("/api/audit?limit=500", headers=_headers(alice)).json()["entries"]
+    assert {"mib", "job", "probe"} <= {e["category"] for e in entries}
+    assert any(e["event"] == "mib_upload" for e in entries)
+    assert any(e["event"] == "job_submitted" for e in entries)
+    assert any(e["category"] == "probe" and e["event"] == "SET" for e in entries)
+    assert all(
+        entries[i]["ts"] >= entries[i + 1]["ts"] for i in range(len(entries) - 1)
+    ), "timeline must be newest first"
+
+    mib_only = client.get("/api/audit?category=mib", headers=_headers(alice)).json()["entries"]
+    assert mib_only and all(e["category"] == "mib" for e in mib_only)
+    by_user = client.get(
+        "/api/audit?user=alice@example.com", headers=_headers(alice),
+    ).json()["entries"]
+    assert by_user and all(e["user"] == ALICE for e in by_user)

@@ -186,7 +186,7 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 - 内网系统，`mock` / `live` 目标默认都可达，不再需要 `allow_live`、目标白名单或 `SNMP_TEST_WEB_ALLOW_SET` 等前置配置。
 - SET 在两种模式下均可执行；页面保留二次确认以防误操作，值仍需符合 MIB 语法（枚举 / 范围 / 长度）。
 - **批量任务仍只读**：任务队列只跑 GET，SET 用例、`--allow-guarded`、错误凭据探测与 flood 用例不可达。
-- **审计溯源**：每次交互探测写入 `work/probe-audit.jsonl`，记录时间、账号、模式、目标、版本、操作、OID、SET 值与类型、结果、错误、返回条数、耗时；**不记录团体字 / v3 密钥**。`GET /api/snmp/audit` 支持按账号 / 操作查询，调试台「操作记录」直接展示最近 30 条。
+- **审计溯源**：MIB 上传 / 删除与任务生命周期写入 `work/jobs/audit.jsonl`，交互探测写入 `work/probe-audit.jsonl`（含 SET 值，不记录团体字 / v3 密钥）。独立页面 `/audit` 把两类日志聚合成统一时间线，覆盖 MIB、任务、探测三类操作，支持按类型 / 账号筛选；`GET /api/audit` 提供同样数据，`GET /api/snmp/audit` 仅查询探测记录。主页面与调试台顶栏都有「操作记录」入口。
 
 **其他默认值**：
 
@@ -209,6 +209,8 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 | GET | `/api/mibs` / `/api/mibs/{id}` | MIB 列表 / 详情（共享） |
 | GET | `/api/mibs/{id}/nodes` / `/api/mibs/{id}/cases` | 节点 / 用例浏览，支持搜索、过滤、分页 |
 | DELETE | `/api/mibs/{id}` | 删除 MIB 及其模型与用例（共享库，任何登录账号可删） |
+| GET | `/audit` | 操作记录页面（需登录） |
+| GET | `/api/audit` | 统一审计时间线，可按 `user` / `category` / `event` / `limit` 查询 |
 | GET | `/debug` | SNMP 调试台页面（需登录） |
 | GET | `/api/snmp/capabilities` | 调试台能力：可用操作、端口、审计开关 |
 | GET | `/api/snmp/audit` | 审计记录，可按 `user` / `operation` / `limit` 查询 |

@@ -25,6 +25,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
+from snmp_test.service.audit import AuditFeed
 from snmp_test.service.auth import AuthError, AuthService, SESSION_TTL_SECONDS, User
 from snmp_test.service.jobs import JobRunner, JobStore
 from snmp_test.service.mibs import MibError, MibLibrary
@@ -112,6 +113,7 @@ def create_app(
         config_path=cfg_path, web_security=security_cfg, workers=workers,
     )
     probe = ProbeService(workspace, cfg_path, library=library, web_security=security_cfg)
+    audit_feed = AuditFeed(workspace)
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
     @asynccontextmanager
@@ -364,6 +366,18 @@ def create_app(
         require(request)
         return {"entries": probe.audit.recent(limit=limit, user=user, operation=operation)}
 
+    @app.get("/api/audit")
+    async def audit_entries(
+        request: Request,
+        limit: int = 100,
+        user: str = "",
+        category: str = "",
+        event: str = "",
+    ):
+        require(request)
+        entries = audit_feed.entries(limit=limit, user=user, category=category, event=event)
+        return {"entries": entries, "total": len(entries)}
+
     @app.post("/api/snmp/probe")
     async def snmp_probe(payload: ProbeRequest, request: Request):
         user = require(request)
@@ -468,6 +482,14 @@ def create_app(
             return RedirectResponse("/", status_code=302)
         return templates.TemplateResponse(
             request, "login.html", {"title": "登录 · bmc-snmp-testkit"}
+        )
+
+    @app.get("/audit", response_class=HTMLResponse)
+    async def audit_page(request: Request):
+        if auth.authenticate(_token(request)) is None:
+            return RedirectResponse("/login", status_code=302)
+        return templates.TemplateResponse(
+            request, "audit.html", {"title": "操作记录 · bmc-snmp-testkit"}
         )
 
     @app.get("/debug", response_class=HTMLResponse)

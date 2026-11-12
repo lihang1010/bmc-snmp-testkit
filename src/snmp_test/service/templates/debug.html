@@ -124,6 +124,7 @@
   </div>
   <div class="nav">
     <span class="pill" id="capPill">读取能力…</span>
+    <a class="btn btn--ghost" href="/audit">操作记录</a>
     <a class="btn btn--ghost" href="/">返回控制台</a>
   </div>
 </header>
@@ -199,15 +200,6 @@
     </table></div>
   </section>
 
-  <section class="card">
-    <div class="card-head"><span class="card-idx">04</span><h2>操作记录（审计）</h2>
-      <button class="btn btn--ghost btn--sm" type="button" id="auditReload">刷新</button></div>
-    <div class="table-scroll"><table>
-      <thead><tr><th>时间</th><th>账号</th><th>操作</th><th>目标</th><th>OID / 值</th><th>结果</th></tr></thead>
-      <tbody id="auditBody"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
-    </table></div>
-    <div class="note">审计文件：<code>work/probe-audit.jsonl</code> · 不记录团体字 / v3 密钥 · SET 的值会保留以便溯源。</div>
-  </section>
 </div>
 
 <div id="confirmDialog" class="modal hidden" role="dialog" aria-modal="true">
@@ -343,29 +335,6 @@
     if(item) applyNode(item);
   });
 
-  function fmtTime(ts){
-    try { return new Date(Number(ts)*1000).toLocaleString('zh-CN',{hour12:false}); }
-    catch(e){ return String(ts); }
-  }
-  function loadAudit(){
-    return api('/api/snmp/audit?limit=30').then(function(d){
-      var rows=d.entries||[];
-      if(!rows.length){
-        $('auditBody').innerHTML='<tr><td colspan="6" class="empty">暂无操作记录</td></tr>';
-        return;
-      }
-      $('auditBody').innerHTML=rows.map(function(r){
-        return '<tr><td>'+esc(fmtTime(r.ts))+'</td><td>'+esc(r.user)+'</td>'+
-          '<td>'+esc(r.operation)+(r.mode==='live'?' <span class="pill">live</span>':'')+'</td>'+
-          '<td>'+esc(r.target)+'</td>'+
-          '<td><code>'+esc(r.oid)+'</code>'+(r.value!=null?' <span class="value">'+esc(r.value)+'</span>':'')+'</td>'+
-          '<td>'+(r.ok
-            ? '<span class="badge badge--ok">成功</span>'
-            : '<span class="badge badge--fail">'+esc(r.error||'失败')+'</span>')+'</td></tr>';
-      }).join('');
-    }).catch(function(e){ toast('加载审计失败: '+e.message, true); });
-  }
-
   function loadCaps(){
     return api('/api/snmp/capabilities').then(function(d){
       caps=d;
@@ -375,7 +344,6 @@
         : '默认直连真实 BMC；需要离线验证框架时勾选「本地自测」。';
       var setBtn=document.querySelector('.ops .btn[data-op="SET"]');
       setBtn.disabled = false;
-      loadAudit();
     }).catch(function(e){ toast('读取能力失败: '+e.message, true); });
   }
 
@@ -450,7 +418,7 @@
     }
     $('runBtn').disabled=true;
     api('/api/snmp/probe',{method:'POST',body:JSON.stringify(body)})
-      .then(function(d){ render(d); loadAudit(); if(!d.ok) toast('探测返回错误: '+d.error, true); })
+      .then(function(d){ render(d); if(!d.ok) toast('探测返回错误: '+d.error, true); })
       .catch(function(e){ toast('探测失败: '+e.message, true); })
       .finally(function(){ $('runBtn').disabled=false; });
   }
@@ -481,7 +449,6 @@
       (body.mode==='live'?'这会修改真实设备配置，请再次确认。':'仅修改本机内存数据。'))
       .then(function(ok){ if(ok) run(); });
   });
-  $('auditReload').addEventListener('click', loadAudit);
   $('clearBtn').addEventListener('click', function(){
     $('resultMeta').innerHTML='<span class="muted">尚未执行</span>';
     $('resultBody').innerHTML='<tr><td colspan="4" class="empty">执行探测后在这里显示 varbind</td></tr>';
