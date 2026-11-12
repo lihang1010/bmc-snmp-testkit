@@ -156,9 +156,9 @@ docs/how-it-works.md          # 白盒说明（实际跑起来发生了什么、
 
 示例报告位于 `runs/<run_id>/report.html`（每次全量运行生成，例如仓库内的 `runs/full-*` 目录）；若目录被清理，重新执行 `python -m snmp_test.cli run` 即可生成。
 
-## 7. Web 服务（邮箱账号 / 只读 / 多 MIB）
+## 7. Web 服务（邮箱账号 / 任务队列 / SNMP 调试台）
 
-面向多人分发的只读 Web 控制台，复用同一套解析、用例、执行与报告内核。
+面向多人分发的 Web 控制台，复用同一套解析、用例、执行与报告内核。批量任务保持只读；交互式调试台单独放宽 SET 边界。
 
 ```powershell
 python -m pip install -r requirements.txt
@@ -177,13 +177,22 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 
 **邮件配置**：设置 `SNMP_TEST_SMTP_HOST`、`SNMP_TEST_SMTP_PORT`、`SNMP_TEST_SMTP_USER`、`SNMP_TEST_SMTP_PASSWORD`、`SNMP_TEST_SMTP_FROM`（可选 `SNMP_TEST_SMTP_TLS` / `SNMP_TEST_SMTP_SSL`）后真发邮件。未配置时进入开发模式：验证码写入 `work/mail-dev.log` 并直接显示在登录页。账号、验证码与会话保存在 `work/auth.db`（SQLite），密码用 PBKDF2-HMAC-SHA256 加盐存储，会话为服务端随机 token + HttpOnly Cookie（默认 7 天）。
 
-**安全默认值**（不可通过 API 覆盖）：
+**SNMP 调试台**（`/debug`）：默认直连真实 BMC，填目标 IP 即可对任意 OID 即时执行 `GET / GETNEXT / WALK / SET`，直接显示 varbind 的 OID、类型、值、异常和耗时，不进任务队列、不生成报告。需要离线验证框架自身时，再勾选「本地自测」切到内存模拟 Agent（独立端口默认 `11911/11912`，可用 `SNMP_TEST_PROBE_MOCK_PORT` / `SNMP_TEST_PROBE_TRAP_PORT` 覆盖）。模拟 Agent 主要服务于 CLI `snmp-test run` 与 pytest 离线回归——它验证解析 / 生成 / 断言 / SNMP 适配层，**不能证明真机兼容性**。WALK 基于 GETNEXT 循环，最多 200 条。OID 既可以直接输入，也可以点「从 MIB 选择」在已上传 MIB 的节点里搜索，选中后按节点语法自动建议 SET 值类型。MIB 查看抽屉也有「调试」标签，点节点行可一键带入 OID。
 
-- 服务级 `readonly_only = true`：只允许 GET；SET、`--allow-guarded`、错误凭据探测、flood 用例均不可达。
-- `live` 仍受服务端控制：需要 `config/web.yaml` 中 `security.allow_live: true`，且目标 IP 在 `security.allowed_targets` 白名单内。这与账号权限无关，默认全部关闭。
-- live 确认闸口已下沉到 `Runtime`（`security.py`），Python API 调用者无法绕过；CLI 仍要求 `--allow-live`。
-- 团体字 / v3 密钥只在任务提交时经内存注入，不写入任何配置或任务文件；日志、报告、快照全部脱敏。
-- 单 worker 串行执行：避免 trap 监听端口冲突与多用户同时打同一台 BMC。模拟 Agent 用 `11811`、trap 监听 `11812`（与 CLI `11611/11612`、测试 `11711/11712` 错开）。
+主页面「提交只读任务」同样默认 `live`，目标 IP 需填写真实 BMC 地址；切到 `mock` 才做本地自测。
+
+**内网信任模型与审计**：
+
+- 内网系统，`mock` / `live` 目标默认都可达，不再需要 `allow_live`、目标白名单或 `SNMP_TEST_WEB_ALLOW_SET` 等前置配置。
+- SET 在两种模式下均可执行；页面保留二次确认以防误操作，值仍需符合 MIB 语法（枚举 / 范围 / 长度）。
+- **批量任务仍只读**：任务队列只跑 GET，SET 用例、`--allow-guarded`、错误凭据探测与 flood 用例不可达。
+- **审计溯源**：每次交互探测写入 `work/probe-audit.jsonl`，记录时间、账号、模式、目标、版本、操作、OID、SET 值与类型、结果、错误、返回条数、耗时；**不记录团体字 / v3 密钥**。`GET /api/snmp/audit` 支持按账号 / 操作查询，调试台「操作记录」直接展示最近 30 条。
+
+**其他默认值**：
+
+- Web 层不再有 live 白名单；CLI 的 `--allow-live` 与 `Runtime` 的 `SecurityPolicy.enforce` 闸口保持不变，只约束命令行调用。
+- 团体字 / v3 密钥只在任务提交或即时探测时经内存注入，不写入任何配置或任务文件；日志、报告、快照全部脱敏。
+- 任务队列默认 2 个 worker 并发（`SNMP_TEST_WEB_WORKERS`，上限 4），按目标互斥：同一台 live BMC 同时只跑一个批次，后到的任务标记「等待中」并自动排队；mock 任务各用独立端口可并行。模拟 Agent 端口 `11811 + slot*10`、trap 监听 `11812 + slot*10`（与 CLI `11611/11612`、测试 `11711/11712` 错开）。
 
 **主要接口**
 
@@ -197,13 +206,20 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 | GET | `/api/auth/me` | 当前账号 |
 | GET | `/api/config` | 服务能力、白名单、队列状态 |
 | POST | `/api/mibs` | 上传 MIB（原始字节 + `X-MIB-Filename`），所有账号共享 |
-| GET | `/api/mibs` / `/api/mibs/{id}/cases` | MIB 列表 / 用例样本（共享） |
+| GET | `/api/mibs` / `/api/mibs/{id}` | MIB 列表 / 详情（共享） |
+| GET | `/api/mibs/{id}/nodes` / `/api/mibs/{id}/cases` | 节点 / 用例浏览，支持搜索、过滤、分页 |
+| DELETE | `/api/mibs/{id}` | 删除 MIB 及其模型与用例（共享库，任何登录账号可删） |
+| GET | `/debug` | SNMP 调试台页面（需登录） |
+| GET | `/api/snmp/capabilities` | 调试台能力：可用操作、端口、审计开关 |
+| GET | `/api/snmp/audit` | 审计记录，可按 `user` / `operation` / `limit` 查询 |
+| POST | `/api/snmp/probe` | 即时 GET/GETNEXT/WALK/SET，返回 varbind 并写审计 |
 | POST | `/api/jobs` | 提交只读任务（归属当前账号） |
 | GET | `/api/jobs` / `/api/jobs/{id}` | 仅返回自己的任务 |
+| DELETE | `/api/jobs/{id}` | 删除自己已完成的任务及其报告 |
 | GET | `/runs/{run_id}/report.html` | 报告，仅任务所有者可访问 |
 | GET | `/runs/{run_id}/results.json` | 机器可读结果，仅任务所有者可访问 |
 
-> `SNMP_TEST_DEV_BYPASS=1` 可跳过登录，仅用于本地调试。trap/inform 与 SET 暂不通过 Web 开放。详见 `docs/how-it-works.md` 第 11 节。
+> `SNMP_TEST_DEV_BYPASS=1` 可跳过登录，仅用于本地调试。内网部署请保留登录并依赖 `work/probe-audit.jsonl` 做溯源。批量 trap/inform 用例仍未通过 Web 开放。详见 `docs/how-it-works.md` 第 11 节。
 
 ## 8. 常见问题
 

@@ -28,6 +28,7 @@ from starlette.concurrency import run_in_threadpool
 from snmp_test.service.auth import AuthError, AuthService, SESSION_TTL_SECONDS, User
 from snmp_test.service.jobs import JobRunner, JobStore
 from snmp_test.service.mibs import MibError, MibLibrary
+from snmp_test.service.probe import ProbeError, ProbeService
 
 COOKIE = "snmp_test_session"
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
@@ -67,6 +68,19 @@ class LoginRequest(BaseModel):
     method: str = "password"
 
 
+class ProbeRequest(BaseModel):
+    mode: str = "mock"
+    target_host: str = "127.0.0.1"
+    target_port: int = 161
+    version: str = "v1"
+    credential: dict[str, Any] = Field(default_factory=dict)
+    operation: str = "GET"
+    oid: str
+    value: str | None = None
+    asn1: str = "OctetString"
+    max_results: int = 50
+
+
 def _web_security(config_path: Path) -> dict[str, Any]:
     if not config_path.is_file():
         return {}
@@ -92,7 +106,12 @@ def create_app(
     auth = AuthService(workspace / "work" / "auth.db")
     library = MibLibrary(workspace, workspace / "config" / "safety-policy.yaml")
     store = JobStore(workspace)
-    runner = JobRunner(workspace, library, store, config_path=cfg_path, web_security=security_cfg)
+    workers = int(os.environ.get("SNMP_TEST_WEB_WORKERS", "2") or 2)
+    runner = JobRunner(
+        workspace, library, store,
+        config_path=cfg_path, web_security=security_cfg, workers=workers,
+    )
+    probe = ProbeService(workspace, cfg_path, library=library, web_security=security_cfg)
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
     @asynccontextmanager
@@ -100,6 +119,7 @@ def create_app(
         await runner.start()
         yield
         await runner.stop()
+        await probe.stop()
 
     app = FastAPI(
         title="bmc-snmp-testkit · 只读测试服务",
@@ -195,13 +215,16 @@ def create_app(
             "user": user.email,
             "readonly_only": True,
             "allowed_operations": ["GET"],
-            "live_enabled": bool(security_cfg.get("allow_live", False)),
-            "allowed_targets": list(security_cfg.get("allowed_targets") or []),
+            "live_enabled": True,
+            "allowed_targets": [],
+            "audit_enabled": True,
             "versions": list(VERSIONS),
             "default_limit": 20,
             "max_limit": MAX_LIMIT,
             "queue_length": runner.pending(),
-            "current_job": runner.current,
+            "current_job": runner.current_jobs[0] if runner.current_jobs else None,
+            "current_jobs": runner.current_jobs,
+            "workers": runner.workers,
             "mib_count": len(library.list()),
             "job_count": len(store.list_for(user.email, 500)),
         }
@@ -330,6 +353,27 @@ def create_app(
         })
         return {"deleted": mib_id}
 
+    # ------------------------------------------------------------- snmp probe
+    @app.get("/api/snmp/capabilities")
+    async def probe_caps(request: Request):
+        require(request)
+        return probe.capabilities()
+
+    @app.get("/api/snmp/audit")
+    async def probe_audit(request: Request, limit: int = 50, user: str = "", operation: str = ""):
+        require(request)
+        return {"entries": probe.audit.recent(limit=limit, user=user, operation=operation)}
+
+    @app.post("/api/snmp/probe")
+    async def snmp_probe(payload: ProbeRequest, request: Request):
+        user = require(request)
+        try:
+            return await probe.execute(payload.model_dump(), user.email)
+        except ProbeError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(502, f"SNMP 请求失败: {exc}") from exc
+
     # ------------------------------------------------------------- jobs
     @app.post("/api/jobs")
     async def create_job(payload: JobRequest, request: Request):
@@ -349,13 +393,6 @@ def create_app(
             library.get(payload.mib_id)
         except MibError as exc:
             raise HTTPException(404, str(exc)) from exc
-        if payload.mode == "live":
-            if not security_cfg.get("allow_live"):
-                raise HTTPException(403, "服务端未开启 security.allow_live")
-            allowed = set(security_cfg.get("allowed_targets") or [])
-            if payload.target_host not in allowed:
-                raise HTTPException(403, "目标不在 security.allowed_targets 白名单内")
-
         job = store.create(
             user=user.name,
             mib_id=payload.mib_id,
@@ -392,8 +429,8 @@ def create_app(
         job = store.get(job_id)
         if job is None or job.user != user.email:
             raise HTTPException(404, "job not found")
-        if job.status in ("queued", "running"):
-            raise HTTPException(409, "任务正在执行，无法删除")
+        if job.status in ("queued", "waiting", "running"):
+            raise HTTPException(409, "任务正在执行或排队，无法删除")
         await run_in_threadpool(store.delete, job_id)
         store.audit_log({"event": "job_deleted", "user": user.email, "job_id": job_id})
         return {"deleted": job_id}
@@ -431,6 +468,14 @@ def create_app(
             return RedirectResponse("/", status_code=302)
         return templates.TemplateResponse(
             request, "login.html", {"title": "登录 · bmc-snmp-testkit"}
+        )
+
+    @app.get("/debug", response_class=HTMLResponse)
+    async def debug_page(request: Request):
+        if auth.authenticate(_token(request)) is None:
+            return RedirectResponse("/login", status_code=302)
+        return templates.TemplateResponse(
+            request, "debug.html", {"title": "SNMP 调试台 · bmc-snmp-testkit"}
         )
 
     @app.get("/", response_class=HTMLResponse)

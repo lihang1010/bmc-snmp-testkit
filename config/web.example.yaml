@@ -11,11 +11,9 @@
 #   SNMP_TEST_SMTP_HOST / SNMP_TEST_SMTP_PORT / SNMP_TEST_SMTP_USER
 #   SNMP_TEST_SMTP_PASSWORD / SNMP_TEST_SMTP_FROM / SNMP_TEST_SMTP_TLS
 
-# 服务级安全策略（与账号权限无关，只决定能否连接真实设备）。
-security:
-  allow_live: false
-  allowed_targets: []
-  # - 192.0.2.10
+# 内网部署：live 目标默认可达，不设 allow_live / 白名单等前置门槛。
+# 所有交互式 SNMP 操作（含 SET 值）写入 work/probe-audit.jsonl，按账号溯源；
+# 凭据不写入审计日志。批量任务仍只跑只读 GET。
 
 # 说明：
 #  - MIB 库所有账号共享；任务队列按账号隔离，只能看到自己的任务与报告。

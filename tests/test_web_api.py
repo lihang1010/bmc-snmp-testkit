@@ -33,7 +33,16 @@ def _web_yaml(allow_live: bool = False, allowed: str = "") -> str:
     return "\n".join(lines) + "\n"
 
 
+_APP_COUNTER = 0
+
+
 def _make_app(root: Path, allow_live: bool = False, allowed: str = "", clear_bypass: bool = True):
+    global _APP_COUNTER
+    _APP_COUNTER += 1
+    # Give each test app its own probe ports so pytest never collides with a
+    # developer's running Web service on the default 11911/11912.
+    os.environ["SNMP_TEST_PROBE_MOCK_PORT"] = str(12900 + _APP_COUNTER)
+    os.environ["SNMP_TEST_PROBE_TRAP_PORT"] = str(13900 + _APP_COUNTER)
     if clear_bypass:
         os.environ.pop("SNMP_TEST_DEV_BYPASS", None)
     (root / "config").mkdir(parents=True, exist_ok=True)
@@ -213,31 +222,35 @@ def test_job_queue_is_private(web):
     assert client.get(f"/api/jobs/{job_id}", headers=_headers(bob)).status_code == 404
 
 
-def test_live_is_denied_by_default(web):
-    client, _, _, alice, bob = web
+def test_live_is_available_without_allowlist(web):
+    client, _, _, alice, _ = web
     mib_id = client.get("/api/mibs", headers=_headers(alice)).json()["mibs"][0]["mib_id"]
     payload = {"mib_id": mib_id, "mode": "live", "target_host": "192.0.2.10",
-               "target_port": 161, "version": "v1", "limit": 5}
-    assert client.post("/api/jobs", json=payload, headers=_headers(alice)).status_code == 403
-    assert client.post("/api/jobs", json=payload, headers=_headers(bob)).status_code == 403
-    assert client.get("/api/config", headers=_headers(alice)).json()["live_enabled"] is False
+               "target_port": 161, "version": "v1", "limit": 1}
+    created = client.post("/api/jobs", json=payload, headers=_headers(alice))
+    assert created.status_code == 200, created.text
+    job_id = created.json()["job"]["job_id"]
+    # The unreachable address fails at the SNMP layer, but must not be rejected by policy.
+    job = _wait_done(client, job_id, alice, timeout=30)
+    assert job["status"] == "done" and "allowlist" not in job["message"]
+    assert client.delete(f"/api/jobs/{job_id}", headers=_headers(alice)).status_code == 200
+    assert client.get("/api/config", headers=_headers(alice)).json()["live_enabled"] is True
 
 
-def test_live_allowlist_is_enforced(tmp_path):
-    root = tmp_path / "allowlist"
-    app = _make_app(root, allow_live=True, allowed="192.0.2.1")
+def test_live_accepts_any_target(tmp_path):
+    root = tmp_path / "live-any"
+    app = _make_app(root)
     with TestClient(app) as client:
         token = _register(client, "live@example.com")
-        assert client.get("/api/config", headers=_headers(token)).json()["allowed_targets"] == ["192.0.2.1"]
         uploaded = client.post(
             "/api/mibs", content=MIB_BYTES,
             headers={**_headers(token), "X-MIB-Filename": "a.mib"},
         ).json()["mib"]["mib_id"]
         payload = {"mib_id": uploaded, "mode": "live", "target_host": "10.0.0.99",
-                   "target_port": 161, "version": "v1", "limit": 5}
-        assert client.post("/api/jobs", json=payload, headers=_headers(token)).status_code == 403
-        payload["target_host"] = "192.0.2.2"
-        assert client.post("/api/jobs", json=payload, headers=_headers(token)).status_code == 403
+                   "target_port": 161, "version": "v1", "limit": 1}
+        created = client.post("/api/jobs", json=payload, headers=_headers(token))
+        assert created.status_code == 200, created.text
+        assert created.json()["job"]["target_host"] == "10.0.0.99"
 
 
 def test_logout_invalidates_session(web):
@@ -338,3 +351,99 @@ def test_delete_mib_and_job(tmp_path):
         assert client.delete(f"/api/jobs/{job_id}", headers=_headers(alice)).status_code == 200
         assert client.get(f"/api/jobs/{job_id}", headers=_headers(alice)).status_code == 404
         assert not (root / "runs" / run_id).exists()
+
+
+def test_concurrent_jobs_and_target_waiting(tmp_path):
+    root = tmp_path / "concurrency"
+    app = _make_app(root, allow_live=True, allowed="192.0.2.99")
+    with TestClient(app) as client:
+        token = _register(client, "conc@example.com")
+        mib_id = client.post(
+            "/api/mibs", content=MIB_BYTES,
+            headers={**_headers(token), "X-MIB-Filename": "conc.mib"},
+        ).json()["mib"]["mib_id"]
+
+        # two mock jobs run side by side on separate worker slots
+        mock_payload = {"mib_id": mib_id, "mode": "mock", "target_host": "127.0.0.1",
+                        "target_port": 11811, "version": "v1", "limit": 2}
+        m1 = client.post("/api/jobs", json=mock_payload, headers=_headers(token)).json()["job"]["job_id"]
+        m2 = client.post("/api/jobs", json=mock_payload, headers=_headers(token)).json()["job"]["job_id"]
+        assert _wait_done(client, m1, token)["status"] == "done"
+        assert _wait_done(client, m2, token)["status"] == "done"
+
+        # the same live target is serialised: the second job waits with a message
+        live_payload = {"mib_id": mib_id, "mode": "live", "target_host": "192.0.2.99",
+                        "target_port": 161, "version": "v1", "limit": 1}
+        l1 = client.post("/api/jobs", json=live_payload, headers=_headers(token)).json()["job"]["job_id"]
+        l2 = client.post("/api/jobs", json=live_payload, headers=_headers(token)).json()["job"]["job_id"]
+        time.sleep(0.6)
+        first = client.get(f"/api/jobs/{l1}", headers=_headers(token)).json()
+        second = client.get(f"/api/jobs/{l2}", headers=_headers(token)).json()
+        assert first["status"] == "running"
+        assert second["status"] == "waiting" and "等待" in second["message"]
+        # both eventually finish (as jobs); the unreachable target only fails cases
+        done1 = _wait_done(client, l1, token, timeout=30)
+        done2 = _wait_done(client, l2, token, timeout=30)
+        assert done1["status"] == "done" and done1["summary"]["failed"] >= 1
+        assert done2["status"] == "done" and done2["summary"]["failed"] >= 1
+        assert done2["started_at"] - done1["started_at"] >= 2.0, "second job must wait for the target"
+
+
+def test_snmp_probe(web):
+    client, _, _, alice, _ = web
+    caps = client.get("/api/snmp/capabilities", headers=_headers(alice)).json()
+    assert caps["operations"] == ["GET", "GETNEXT", "WALK", "SET"]
+    assert caps["mock_set"] is True and caps["live_set"] is True
+    assert caps["audit_enabled"] is True
+
+    base = {"mode": "mock", "version": "v1"}
+    got = client.post(
+        "/api/snmp/probe", headers=_headers(alice),
+        json={**base, "operation": "GET", "oid": "1.3.6.1.2.1.1.1.0"},
+    )
+    assert got.status_code == 200, got.text
+    body = got.json()
+    assert body["ok"] and body["count"] == 1
+    assert body["varbinds"][0]["value"] == "Mock BMC SNMP Agent"
+
+    nxt = client.post(
+        "/api/snmp/probe", headers=_headers(alice),
+        json={**base, "operation": "GETNEXT", "oid": "1.3.6.1.2.1.1.1"},
+    ).json()
+    assert nxt["ok"] and nxt["varbinds"][0]["oid"] == "1.3.6.1.2.1.1.1.0"
+
+    walk = client.post(
+        "/api/snmp/probe", headers=_headers(alice),
+        json={**base, "operation": "WALK", "oid": "1.3.6.1.2.1.1", "max_results": 8},
+    ).json()
+    assert walk["ok"] and walk["count"] >= 3
+
+    written = client.post(
+        "/api/snmp/probe", headers=_headers(alice),
+        json={**base, "operation": "SET", "oid": "1.3.6.1.4.1.52305.2.7.1.0",
+              "value": "1", "asn1": "Integer32", "credential": {"community": "private"}},
+    )
+    assert written.status_code == 200 and written.json()["ok"], written.text
+
+    assert client.post(
+        "/api/snmp/probe", headers=_headers(alice),
+        json={**base, "operation": "GET", "oid": "not-an-oid"},
+    ).status_code == 400
+    # live is reachable without an allowlist; an unreachable host fails only at SNMP level
+    live = client.post(
+        "/api/snmp/probe", headers=_headers(alice),
+        json={"mode": "live", "operation": "GET", "oid": "1.3.6.1.2.1.1.1.0",
+              "target_host": "192.0.2.99"},
+    )
+    assert live.status_code == 200, live.text
+
+    audit = client.get("/api/snmp/audit", headers=_headers(alice)).json()["entries"]
+    assert audit and any(e["operation"] == "SET" and e["value"] == "1" for e in audit)
+    assert any(e["mode"] == "live" for e in audit)
+    assert all(
+        "credential" not in e and "community" not in e and "priv_key" not in e for e in audit
+    )
+    filtered = client.get(
+        "/api/snmp/audit?operation=SET", headers=_headers(alice),
+    ).json()["entries"]
+    assert filtered and all(e["operation"] == "SET" for e in filtered)

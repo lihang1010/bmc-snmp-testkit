@@ -23,11 +23,18 @@ from snmp_test.report.writers import write_all
 from snmp_test.runner.case_store import CaseFilter
 from snmp_test.runner.executor import make_run_id, run_batch
 from snmp_test.runner.safety import load_policy
-from snmp_test.security import AccessDenied, SecurityPolicy
+from snmp_test.security import SecurityPolicy
 from snmp_test.service.mibs import MibLibrary
 
 WEB_MOCK_PORT = 11811
 WEB_TRAP_PORT = 11812
+PORT_STRIDE = 10
+MAX_WORKERS = 4
+
+
+def slot_ports(slot: int) -> tuple[int, int]:
+    """Each worker slot gets its own mock/trap port pair, so runs can overlap."""
+    return WEB_MOCK_PORT + slot * PORT_STRIDE, WEB_TRAP_PORT + slot * PORT_STRIDE
 
 
 @dataclass
@@ -171,6 +178,7 @@ class JobRunner:
         *,
         config_path: str | Path | None = None,
         web_security: dict[str, Any] | None = None,
+        workers: int = 2,
     ) -> None:
         self.root = Path(root)
         self.library = library
@@ -178,21 +186,31 @@ class JobRunner:
         self.config_path = Path(config_path) if config_path else self.root / "config" / "web.yaml"
         self.web_security = dict(web_security or {})
         self.queue: asyncio.Queue[Job | None] = asyncio.Queue()
-        self._task: asyncio.Task | None = None
-        self.current: str | None = None
+        self.workers = max(1, min(int(workers), MAX_WORKERS))
+        self._tasks: list[asyncio.Task] = []
+        self._current: dict[int, str] = {}
+        self._target_locks: dict[str, asyncio.Lock] = {}
+
+    @property
+    def current_jobs(self) -> list[str]:
+        return [job_id for job_id in self._current.values() if job_id]
 
     async def start(self) -> "JobRunner":
-        self._task = asyncio.create_task(self._worker(), name="snmp-job-worker")
+        for slot in range(self.workers):
+            self._tasks.append(
+                asyncio.create_task(self._worker(slot), name=f"snmp-job-worker-{slot}")
+            )
         return self
 
     async def stop(self) -> None:
-        if self._task is not None:
+        for _ in self._tasks:
             await self.queue.put(None)
+        for task in self._tasks:
             try:
-                await asyncio.wait_for(self._task, timeout=5)
+                await asyncio.wait_for(task, timeout=10)
             except asyncio.TimeoutError:
-                self._task.cancel()
-            self._task = None
+                task.cancel()
+        self._tasks.clear()
 
     async def submit(self, job: Job) -> None:
         await self.queue.put(job)
@@ -200,34 +218,60 @@ class JobRunner:
     def pending(self) -> int:
         return self.queue.qsize()
 
-    async def _worker(self) -> None:
+    async def _worker(self, slot: int) -> None:
         while True:
             job = await self.queue.get()
             if job is None:
                 self.queue.task_done()
-                break
-            self.current = job.job_id
+                return
             try:
-                await self._execute(job)
-            except Exception as exc:
-                job.status = "failed"
-                job.message = f"{type(exc).__name__}: {exc}"
-                job.finished_at = time.time()
-                self.store.update(job)
-                self.store.audit_log({
-                    "event": "job_failed", "job_id": job.job_id, "user": job.user,
-                    "mib_id": job.mib_id, "target": job.target_host,
-                    "mode": job.mode, "error": job.message,
-                })
+                await self._run_job(job, slot)
             finally:
-                self.current = None
                 self.queue.task_done()
 
-    def _build_config(self, job: Job):
+    async def _run_job(self, job: Job, slot: int) -> None:
+        # Different targets may run in parallel; the same live target is serialised
+        # so a real BMC never receives two batches at once.
+        lock: asyncio.Lock | None = None
+        if job.mode == "live":
+            lock = self._target_locks.setdefault(job.target_host, asyncio.Lock())
+            if lock.locked():
+                job.status = "waiting"
+                job.message = f"目标 {job.target_host} 正在执行其他任务，等待中"
+                self.store.update(job)
+                self.store.audit_log({
+                    "event": "job_waiting", "job_id": job.job_id,
+                    "user": job.user, "target": job.target_host,
+                })
+        if lock is None:
+            await self._run_slot(job, slot)
+            return
+        async with lock:
+            await self._run_slot(job, slot)
+
+    async def _run_slot(self, job: Job, slot: int) -> None:
+        self._current[slot] = job.job_id
+        try:
+            await self._execute(job, slot)
+        except Exception as exc:
+            job.status = "failed"
+            job.message = f"{type(exc).__name__}: {exc}"
+            job.finished_at = time.time()
+            self.store.update(job)
+            self.store.audit_log({
+                "event": "job_failed", "job_id": job.job_id, "user": job.user,
+                "mib_id": job.mib_id, "target": job.target_host,
+                "mode": job.mode, "error": job.message,
+            })
+        finally:
+            self._current.pop(slot, None)
+
+    def _build_config(self, job: Job, slot: int = 0):
         model_path = self.library.model_path(job.mib_id)
         mib_path = self.library.mib_path(job.mib_id)
+        mock_port, trap_port = slot_ports(slot)
         if job.mode == "mock":
-            host, port = "127.0.0.1", WEB_MOCK_PORT
+            host, port = "127.0.0.1", mock_port
             cred = {"community": "private", "read_only_community": "public"}
         else:
             host, port = job.target_host, job.target_port
@@ -256,13 +300,13 @@ class JobRunner:
             }],
             "mock": {
                 "bind_host": "127.0.0.1",
-                "port": WEB_MOCK_PORT,
-                "trap_port": WEB_TRAP_PORT,
+                "port": mock_port,
+                "trap_port": trap_port,
                 "rows_per_table": 2,
                 "communities": {"read_only": "public", "read_write": "private"},
                 "v3": v3,
             },
-            "trap": {"listen_host": "127.0.0.1", "listen_port": WEB_TRAP_PORT, "receive_timeout_s": 5.0},
+            "trap": {"listen_host": "127.0.0.1", "listen_port": trap_port, "receive_timeout_s": 5.0},
             "execution": {
                 "concurrency": 4, "timeout_s": 3.0, "retries": 0,
                 "rows_per_table": 2, "max_cases_per_table": 8,
@@ -270,8 +314,8 @@ class JobRunner:
                 "allow_guarded": False, "enable_set": False, "limit": 0, "seed": 20261109,
             },
             "security": {
-                "allow_live": bool(self.web_security.get("allow_live", False)),
-                "allowed_targets": list(self.web_security.get("allowed_targets") or []),
+                "allow_live": True,
+                "allowed_targets": [host] if job.mode == "live" else [],
                 "readonly_only": True,
             },
             "report": {"output_dir": "runs", "pdu_log_sample_rate": 1.0, "log_level": "INFO"},
@@ -281,7 +325,7 @@ class JobRunner:
         model = MibModel.from_dict(json.loads(Path(model_path).read_text(encoding="utf-8")))
         return cfg, model
 
-    async def _execute(self, job: Job) -> None:
+    async def _execute(self, job: Job, slot: int = 0) -> None:
         job.status = "running"
         job.started_at = time.time()
         self.store.update(job)
@@ -293,10 +337,8 @@ class JobRunner:
 
         if job.mode not in ("mock", "live"):
             raise ValueError(f"unsupported mode {job.mode!r}")
-        if job.mode == "live" and job.target_host not in set(self.web_security.get("allowed_targets") or []):
-            raise AccessDenied(f"target {job.target_host!r} is not in security.allowed_targets")
 
-        cfg, model = self._build_config(job)
+        cfg, model = self._build_config(job, slot)
         cases = self.library.load_cases(job.mib_id).select(
             CaseFilter(
                 operations={"GET"},
@@ -312,8 +354,8 @@ class JobRunner:
         job.case_count = len(cases)
 
         security = SecurityPolicy(
-            allow_live=bool(self.web_security.get("allow_live", False)),
-            allowed_targets=tuple(self.web_security.get("allowed_targets") or []),
+            allow_live=True,
+            allowed_targets=(job.target_host,) if job.mode == "live" else (),
             readonly_only=True,
         )
         run_id = f"web-{job.job_id}"
