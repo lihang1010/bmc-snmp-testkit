@@ -9,7 +9,7 @@ import uuid
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from snmp_test.config import Config, TargetConfig
 from snmp_test.model.types import CaseResult, MibModel, SnmpResponse, TestCase, TrapRecord
@@ -105,16 +105,33 @@ class Runtime:
     def targets_for(self, case: TestCase) -> list[TargetConfig]:
         return [t for t in self.cfg.targets if case.version in t.versions]
 
-    async def run(self, cases: list[TestCase], *, dry_run: bool = False) -> list[CaseResult]:
+    async def run(
+        self,
+        cases: list[TestCase],
+        *,
+        dry_run: bool = False,
+        on_progress: Callable[[int, int, int, int], None] | None = None,
+        cancel_event: asyncio.Event | None = None,
+    ) -> list[CaseResult]:
         self.dry_run = dry_run
         pairs: list[tuple[TargetConfig, TestCase]] = []
         for case in cases:
             for target in self.targets_for(case):
                 pairs.append((target, case))
         self.collector.logger.info("scheduled %d case x target executions", len(pairs))
+        # Progress is reported from inside _run_one (per completed case) instead
+        # of from the wait loop: awaiting completions one by one (as_completed)
+        # perturbs event-loop scheduling enough to make SNMP timeouts flaky.
+        self._progress_cb = on_progress
+        self._progress_total = len(pairs)
+        self._progress_done = 0
+        self._progress_passed = 0
+        self._progress_failed = 0
         results: list[CaseResult] = []
-        chunk = 400
+        chunk = 50
         for start in range(0, len(pairs), chunk):
+            if cancel_event is not None and cancel_event.is_set():
+                break
             batch = pairs[start : start + chunk]
             gathered = await asyncio.gather(
                 *(self._run_one(target, case) for target, case in batch),
@@ -122,6 +139,17 @@ class Runtime:
             )
             results.extend(gathered)
         return results
+
+    def _bump_progress(self, result: CaseResult) -> None:
+        cb = getattr(self, "_progress_cb", None)
+        if cb is None:
+            return
+        self._progress_done += 1
+        if result.status == "passed":
+            self._progress_passed += 1
+        elif result.status in ("failed", "error"):
+            self._progress_failed += 1
+        cb(self._progress_done, self._progress_total, self._progress_passed, self._progress_failed)
 
     async def run_one(self, target: TargetConfig, case: TestCase) -> CaseResult:
         """Public single-case entry point used by the pytest bridge."""
@@ -176,6 +204,7 @@ class Runtime:
             result.logs.append(traceback.format_exc(limit=6))
         result.duration_ms = round((time.perf_counter() - started) * 1000, 2)
         self.collector.add(result)
+        self._bump_progress(result)
         return result
 
     def _override(self, target: TargetConfig, case: TestCase) -> dict[str, Any]:
@@ -290,6 +319,8 @@ async def run_batch(
     readonly_only: bool | None = None,
     security: SecurityPolicy | None = None,
     dry_run: bool = False,
+    on_progress: Callable[[int, int, int, int], None] | None = None,
+    cancel_event: asyncio.Event | None = None,
 ) -> tuple[Runtime, list[CaseResult]]:
     """Convenience entry point: start resources, run, stop, return results."""
     runtime = Runtime(
@@ -299,7 +330,9 @@ async def run_batch(
     )
     await runtime.start()
     try:
-        results = await runtime.run(cases, dry_run=dry_run)
+        results = await runtime.run(
+            cases, dry_run=dry_run, on_progress=on_progress, cancel_event=cancel_event,
+        )
     finally:
         await runtime.stop()
     return runtime, results

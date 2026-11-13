@@ -37,6 +37,12 @@
   .failbox code { color:#fca5a5; }
   .scroll { max-height:520px; overflow:auto; border-radius:8px; }
   footer { color:var(--muted); font-size:12px; text-align:center; padding:20px; border-top:1px solid var(--line); }
+  .link { color:var(--accent); cursor:pointer; user-select:none; }
+  .link:hover { text-decoration:underline; }
+  .resp { margin-top:6px; }
+  .resp-status { font-size:12px; margin-bottom:6px; }
+  .vb { font-size:12px; box-shadow:none; }
+  .vb th, .vb td { padding:5px 9px; }
 </style>
 </head>
 <body>
@@ -45,6 +51,32 @@
   <div class="sub">运行 ID <b>{{ run_id }}</b> · 生成于 {{ generated_at }} · 模式 <b>{{ mode }}</b> · 报告为静态产物，凭据已脱敏</div>
 </header>
 <div class="wrap">
+
+  {% macro render_response(actual) %}
+  {% if actual %}
+    <div class="resp">
+      <div class="resp-status">
+        {% if actual.error_indication %}<span class="fail">错误：{{ actual.error_indication }}</span>
+        {% else %}<span class="{{ 'ok' if actual.error_status in ('noError','0') else 'fail' }}">状态：{{ actual.error_status or 'noError' }}</span>{% endif %}
+        <span class="sub">· {{ actual.get('operation','') }}/{{ actual.get('version','') }} · {{ actual.get('elapsed_ms',0) }}ms</span>
+      </div>
+      {% set vb = actual.get('varbinds') %}
+      {% if vb %}
+      <table class="vb">
+        <thead><tr><th>OID</th><th>类型</th><th>实际返回值</th></tr></thead>
+        <tbody>
+        {% for v in vb %}<tr><td><code>{{ v.oid }}</code></td><td>{{ v.type }}</td><td>{{ v.value }}{% if v.exception %} <span class="warn">({{ v.exception }})</span>{% endif %}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      {# 无 varbind 时只展示真实响应本身，绝不展示 _assertions 等断言细节 #}
+      {% if actual.get('raw') %}<pre>{{ actual.raw }}</pre>
+      {% elif actual.get('trap') %}<pre>{{ actual.trap | tojson(indent=2) }}</pre>
+      {% else %}<span class="sub">无返回明细（仅状态：{{ actual.get('error_status','-') }}{% if actual.get('error_indication') %} / {{ actual.error_indication }}{% endif %}）</span>{% endif %}
+      {% endif %}
+    </div>
+  {% else %}<span class="sub">无返回值</span>{% endif %}
+  {% endmacro %}
 
   <div class="grid">
     <div class="card"><div class="label">通过率</div><div class="value {% if summary.overall.pass_rate >= 95 %}ok{% elif summary.overall.pass_rate >= 80 %}warn{% else %}fail{% endif %}">{{ summary.overall.pass_rate }}%</div></div>
@@ -88,9 +120,8 @@
       <div class="failbox">
         <div><code>{{ f.case_id }}</code> · <b>{{ f.name }}</b> · <span class="fail">{{ f.status }}</span> · {{ f.operation }}/{{ f.version }} · {{ f.target }}</div>
         <div style="color:var(--muted);margin-top:4px">原因：{{ f.message }}</div>
-        <details><summary style="cursor:pointer;color:var(--accent);margin-top:6px">查看期望与实际</summary>
-          <pre>期望：{{ f.expectation | tojson(indent=2) }}
-实际：{{ f.actual | tojson(indent=2) }}</pre>
+        <details><summary style="cursor:pointer;color:var(--accent);margin-top:6px">实际返回值（真值）</summary>
+          {{ render_response(f.actual) }}
         </details>
       </div>
     {% endfor %}
@@ -105,7 +136,7 @@
     <select id="ver"><option value="">全部版本</option><option>v1</option><option>v2c</option><option>v3</option></select>
   </div>
   <div class="scroll"><table id="cases">
-    <thead><tr><th>用例 ID</th><th>名称</th><th>操作</th><th>版本</th><th>目标</th><th>状态</th><th>耗时(ms)</th><th>说明</th><th>标签</th></tr></thead>
+    <thead><tr><th>用例 ID</th><th>名称</th><th>操作</th><th>版本</th><th>目标</th><th>状态</th><th>耗时(ms)</th><th>返回值</th><th>说明</th><th>标签</th></tr></thead>
     <tbody>
     {% for r in results %}
       <tr data-status="{{ r.status }}" data-op="{{ r.operation }}" data-ver="{{ r.version }}">
@@ -114,6 +145,7 @@
         <td>{{ r.operation }}</td><td>{{ r.version }}</td><td>{{ r.target }}</td>
         <td class="status {{ 'ok' if r.status == 'passed' else 'fail' if r.status in ('failed','error') else 'skip' }}">{{ r.status }}</td>
         <td>{{ r.duration_ms }}</td>
+        <td><details><summary class="link">查看</summary>{{ render_response(r.actual) }}</details></td>
         <td>{{ r.message }}</td>
         <td>{% for t in r.tags %}<span class="tag">{{ t }}</span>{% endfor %}</td>
       </tr>

@@ -99,10 +99,12 @@
   .value{font-weight:650}
   .muted{color:var(--muted)}
   .empty{padding:38px 10px;text-align:center;color:var(--faint);font-size:12px}
-  #toast{position:fixed;right:24px;bottom:24px;z-index:50;display:none;max-width:420px;
-    padding:12px 16px;border-radius:11px;background:var(--surface);border:1px solid var(--line);
-    border-left:3px solid var(--accent);box-shadow:0 18px 40px rgba(15,23,42,.16);font-size:12.5px}
-  #toast.bad{border-left-color:var(--fail)}
+  #toast{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:100;display:none;
+    max-width:min(460px,calc(100vw - 32px));padding:13px 18px;border-radius:12px;font-weight:600;font-size:13px;
+    background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);
+    box-shadow:0 20px 48px rgba(15,23,42,.22);color:var(--text);animation:toast-in .25s ease-out}
+  #toast.bad{background:#fef2f2;border-color:#fecaca;border-left-color:var(--fail);color:#b91c1c}
+  @keyframes toast-in{from{opacity:0;transform:translateX(-50%) translateY(-12px)}to{opacity:1;transform:translateX(-50%)}}
   .modal{position:fixed;inset:0;z-index:70;display:grid;place-items:center;padding:20px}
   .modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.42);backdrop-filter:blur(3px)}
   .modal-card{position:relative;width:min(420px,100%);padding:24px;background:var(--surface);
@@ -113,6 +115,17 @@
   .modal-text{font-size:12.5px;color:var(--muted);line-height:1.7;word-break:break-word}
   .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
   .hidden{display:none !important}
+  .result-toolbar{display:flex;gap:18px;align-items:center;padding:10px 2px 14px;flex-wrap:wrap;border-bottom:1px solid var(--line-soft);margin-bottom:2px}
+  .result-toolbar .muted{font-size:12px}
+  .chk{font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;
+    border:1px solid var(--line);border-radius:8px;padding:5px 12px;background:var(--surface);transition:.15s}
+  .chk input{display:none}
+  .chk:has(input:checked){background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700}
+  .result-toolbar .muted{font-size:12px;color:var(--text);font-weight:600}
+  .tbl-block{margin:16px 0 4px}
+  .tbl-block:first-child{margin-top:2px}
+  .tbl-title{font-size:12.5px;font-weight:700;color:var(--text);margin:0 0 8px 2px}
+  .tbl-title .cnt{color:var(--muted);font-weight:600}
   @media(max-width:700px){.grid{grid-template-columns:minmax(0,1fr)}.grid>.span2{grid-column:auto}}
 </style>
 </head>
@@ -124,6 +137,7 @@
   </div>
   <div class="nav">
     <span class="pill" id="capPill">读取能力…</span>
+    <a class="btn btn--ghost" href="/mib-browser">MIB 浏览器</a>
     <a class="btn btn--ghost" href="/audit">操作记录</a>
     <a class="btn btn--ghost" href="/">返回控制台</a>
   </div>
@@ -136,7 +150,7 @@
       <div><label for="host">目标 IP</label><input id="host" placeholder="真实 BMC IP，例如 10.20.30.40"></div>
       <div><label for="port">端口</label><input id="port" type="number" value="161"></div>
       <div><label for="version">SNMP 版本</label><select id="version"><option>v1</option><option>v2c</option><option>v3</option></select></div>
-      <div><label for="community">团体字</label><input id="community" value="private" type="password"></div>
+      <div><label for="community">团体字</label><input id="community" value="rwcommstr" type="text"></div>
       <div class="span2 hidden" id="v3box"><div class="grid">
         <div><label for="v3user">v3 用户</label><input id="v3user"></div>
         <div><label for="securityLevel">安全级别</label><select id="securityLevel"><option>authPriv</option><option>authNoPriv</option><option>noAuthNoPriv</option></select></div>
@@ -182,7 +196,7 @@
         <option>OctetString</option><option>Integer32</option><option>IpAddress</option>
         <option>ObjectIdentifier</option><option>TimeTicks</option>
       </select></div>
-      <div id="walkLimit" class="hidden"><label for="maxResults">WALK 最大条数</label><input id="maxResults" type="number" value="50" min="1" max="200"></div>
+      <div id="walkLimit" class="hidden"><label for="maxResults">WALK 最大条数</label><input id="maxResults" type="number" value="200" min="1" max="200"></div>
     </div>
     <div class="note warn hidden" id="setWarning"></div>
     <div class="form-actions">
@@ -194,10 +208,13 @@
   <section class="card">
     <div class="card-head"><span class="card-idx">03</span><h2>返回值</h2></div>
     <div class="result-meta" id="resultMeta"><span class="muted">尚未执行</span></div>
-    <div class="table-scroll"><table>
-      <thead><tr><th>OID</th><th>类型</th><th>值</th><th>异常</th></tr></thead>
-      <tbody id="resultBody"><tr><td colspan="4" class="empty">执行探测后在这里显示 varbind</td></tr></tbody>
-    </table></div>
+    <div class="result-toolbar" id="resultToolbar" style="display:none">
+      <span class="muted">视图</span>
+      <label class="chk"><input type="radio" name="view" value="smart" checked> Table View（表格）</label>
+      <label class="chk"><input type="radio" name="view" value="tableonly"> 仅表格</label>
+      <label class="chk"><input type="radio" name="view" value="raw"> Raw（原始 OID）</label>
+    </div>
+    <div class="table-scroll" id="resultScroll"><div class="empty">执行探测后在这里显示结果</div></div>
   </section>
 
 </div>
@@ -367,6 +384,8 @@
     b.addEventListener('click', function(){ setOp(this.dataset.op); });
   });
   $('localMock').addEventListener('change', function(){
+    // 本地自测（模拟 Agent）固定使用 private 团体字；直连真实设备时回归默认 rwcommstr
+    $('community').value = this.checked ? 'private' : 'rwcommstr';
     if(currentOp==='SET') setOp('SET');
   });
   $('version').addEventListener('change', function(){
@@ -389,7 +408,35 @@
     };
   }
 
-  function render(d){
+  var lastResult=null, currentCols=null, viewMode='smart';
+  var columnCache={};
+
+  // Load every column node of the selected MIB (paging past the endpoint's
+  // per-page cap) so WALK/GETNEXT results can be grouped into MIB-browser-style
+  // tables (column OID prefix -> table/name).
+  function ensureColumns(mibId){
+    if(!mibId) return Promise.resolve(null);
+    if(columnCache[mibId]) return Promise.resolve(columnCache[mibId]);
+    var all=[];
+    (function page(off){
+      return api('/api/mibs/'+mibId+'/nodes?kind=column&limit=200&offset='+off).then(function(d){
+        var nodes=d.nodes||[];
+        all=all.concat(nodes);
+        if(nodes.length && off+nodes.length < d.total) return page(off+nodes.length);
+        var prefixMap={}, tables={};
+        all.forEach(function(n){
+          if(n.kind!=='column' || !n.oid) return;
+          prefixMap[n.oid]={name:n.name, table_name:n.table_name};
+          (tables[n.table_name]=tables[n.table_name]||[]).push({oid:n.oid, name:n.name});
+        });
+        var info={prefixMap:prefixMap, tables:tables};
+        columnCache[mibId]=info;
+        return info;
+      });
+    })(0);
+  }
+
+  function renderMeta(d){
     var meta='<span class="badge '+(d.ok?'badge--ok':'badge--fail')+'">'+(d.ok?'成功':'失败')+'</span>'+
       '<span>操作 <b>'+esc(d.operation)+'</b></span>'+
       '<span>OID <b>'+esc(d.oid)+'</b></span>'+
@@ -400,14 +447,98 @@
       (d.truncated?'<span class="badge badge--fail">已达条数上限</span>':'')+
       (d.error?'<span>错误 <b style="color:var(--fail)">'+esc(d.error)+'</b></span>':'');
     $('resultMeta').innerHTML=meta;
-    if(!d.varbinds.length){
-      $('resultBody').innerHTML='<tr><td colspan="4" class="empty">'+(d.error?'没有返回 varbind':'无返回数据')+'</td></tr>';
-      return;
+  }
+
+  // Split varbinds into table groups (by matching column OID prefix) and scalars.
+  function groupTables(varbinds, cols){
+    var tables={}, scalars=[];
+    if(cols){
+      var pmap=cols.prefixMap, prefixes=Object.keys(pmap);
+      varbinds.forEach(function(vb){
+        var bestLen=-1, bestInfo=null;
+        prefixes.forEach(function(p){
+          if(vb.oid.length>p.length && vb.oid.indexOf(p+'.')===0 && p.length>bestLen){
+            bestLen=p.length; bestInfo=pmap[p];
+          }
+        });
+        if(bestInfo){
+          var idx=vb.oid.slice(bestLen+1);
+          var t=tables[bestInfo.table_name]||(tables[bestInfo.table_name]={rows:{}});
+          (t.rows[idx]=t.rows[idx]||{})[bestInfo.name]=vb;
+        } else {
+          scalars.push(vb);
+        }
+      });
+    } else {
+      scalars=varbinds.slice();
     }
-    $('resultBody').innerHTML=d.varbinds.map(function(v){
-      return '<tr><td><code>'+esc(v.oid)+'</code></td><td>'+esc(v.type)+'</td>'+
-        '<td class="value">'+esc(v.value)+'</td><td>'+(v.exception?'<span style="color:var(--fail)">'+esc(v.exception)+'</span>':'<span class="muted">—</span>')+'</td></tr>';
-    }).join('');
+    return {tables:tables, scalars:scalars};
+  }
+
+  function renderTableBlock(name, t, cols){
+    var colDefs=cols.tables[name]||[];
+    var idxs=Object.keys(t.rows);
+    var html='<div class="tbl-block"><div class="tbl-title">表 <code>'+esc(name)+'</code> '+
+      '<span class="cnt">· '+idxs.length+' 行 / '+colDefs.length+' 列</span></div>';
+    html+='<div class="table-scroll"><table><thead><tr><th>索引</th>';
+    colDefs.forEach(function(c){ html+='<th>'+esc(c.name)+'</th>'; });
+    html+='</tr></thead><tbody>';
+    idxs.forEach(function(ix){
+      html+='<tr><td><code>'+esc(ix)+'</code></td>';
+      colDefs.forEach(function(c){
+        var vb=t.rows[ix][c.name];
+        html+= vb ? '<td class="value">'+esc(vb.value)+'</td>' : '<td class="muted">—</td>';
+      });
+      html+='</tr>';
+    });
+    html+='</tbody></table></div></div>';
+    return html;
+  }
+
+  function rawRowsHtml(rows){
+    if(!rows.length) return '';
+    var html='<div class="table-scroll"><table><thead><tr><th>OID</th><th>类型</th><th>值</th><th>异常</th></tr></thead><tbody>';
+    rows.forEach(function(v){
+      html+='<tr><td><code>'+esc(v.oid)+'</code></td><td>'+esc(v.type)+'</td>'+
+        '<td class="value">'+esc(v.value)+'</td>'+
+        '<td>'+(v.exception?'<span style="color:var(--fail)">'+esc(v.exception)+'</span>':'<span class="muted">—</span>')+'</td></tr>';
+    });
+    html+='</tbody></table></div>';
+    return html;
+  }
+
+  function renderBody(){
+    var d=lastResult; if(!d) return;
+    var grouped=groupTables(d.varbinds||[], currentCols);
+    var tableNames=Object.keys(grouped.tables);
+    var html='';
+    if(d.truncated){
+      html+='<div class="note warn">结果已达安全上限仍未取尽，表格可能不完整；可缩小 OID 范围分列查看。</div>';
+    }
+    if(viewMode!=='raw' && tableNames.length){
+      tableNames.forEach(function(name){
+        html+=renderTableBlock(name, grouped.tables[name], currentCols);
+      });
+    }
+    if(viewMode!=='tableonly'){
+      var rows=(viewMode==='raw')?(d.varbinds||[]):grouped.scalars;
+      var label=(viewMode==='raw')?'原始 OID 列表':(tableNames.length?'其他（非表）节点':'返回值');
+      if(rows.length){
+        html+='<div class="tbl-block"><div class="tbl-title">'+esc(label)+
+          ' <span class="cnt">· '+rows.length+' 条</span></div>'+rawRowsHtml(rows)+'</div>';
+      }
+    }
+    $('resultScroll').innerHTML= html || '<div class="empty">没有返回数据</div>';
+  }
+
+  function render(d){
+    lastResult=d;
+    renderMeta(d);
+    ensureColumns($('pickerMib').value).then(function(cols){
+      currentCols=cols;
+      $('resultToolbar').style.display='flex';
+      renderBody();
+    }).catch(function(){ currentCols=null; renderBody(); });
   }
 
   function run(){
@@ -416,8 +547,36 @@
     if(body.mode==='live' && !body.target_host){
       toast('请填写目标 BMC IP；或者勾选「本地自测」', true); return;
     }
+    if(body.mode==='live'){
+      if(body.version==='v3'){
+        if(!body.credential.v3_user){ toast('v3 模式请填写用户名', true); return; }
+        var lvl=body.credential.security_level||'authPriv';
+        if((lvl==='authNoPriv'||lvl==='authPriv') && !body.credential.auth_key){ toast('当前安全级别需要填写认证密钥', true); return; }
+        if(lvl==='authPriv' && !body.credential.priv_key){ toast('当前安全级别需要填写加密密钥', true); return; }
+      } else if(!body.credential.community){ toast('live 模式请填写团体名', true); return; }
+    }
     $('runBtn').disabled=true;
-    api('/api/snmp/probe',{method:'POST',body:JSON.stringify(body)})
+    // WALK continuation: when a page hits the per-request cap, keep walking from
+    // the last returned OID so a whole table is collected (MIB-browser style),
+    // instead of silently cutting columns off at the limit.
+    var MAX_PAGES=10;
+    function walkPage(b, acc, pages){
+      return api('/api/snmp/probe',{method:'POST',body:JSON.stringify(b)}).then(function(d){
+        if(!acc){ acc=d; }
+        else{
+          acc.count+=d.count;
+          acc.varbinds=acc.varbinds.concat(d.varbinds||[]);
+          acc.elapsed_ms=acc.elapsed_ms+d.elapsed_ms;
+          acc.truncated=d.truncated;
+        }
+        if(d.ok && currentOp==='WALK' && d.truncated && (d.varbinds||[]).length && pages<MAX_PAGES){
+          var nb=Object.assign({}, b, {cursor:d.next_cursor || d.varbinds[d.varbinds.length-1].oid});
+          return walkPage(nb, acc, pages+1);
+        }
+        return acc;
+      });
+    }
+    walkPage(body, null, 1)
       .then(function(d){ render(d); if(!d.ok) toast('探测返回错误: '+d.error, true); })
       .catch(function(e){ toast('探测失败: '+e.message, true); })
       .finally(function(){ $('runBtn').disabled=false; });
@@ -450,8 +609,14 @@
       .then(function(ok){ if(ok) run(); });
   });
   $('clearBtn').addEventListener('click', function(){
+    lastResult=null; currentCols=null;
     $('resultMeta').innerHTML='<span class="muted">尚未执行</span>';
-    $('resultBody').innerHTML='<tr><td colspan="4" class="empty">执行探测后在这里显示 varbind</td></tr>';
+    $('resultToolbar').style.display='none';
+    $('resultScroll').innerHTML='<div class="empty">执行探测后在这里显示结果</div>';
+  });
+
+  document.querySelectorAll('input[name="view"]').forEach(function(r){
+    r.addEventListener('change', function(){ viewMode=this.value; renderBody(); });
   });
 
   setOp('GET');

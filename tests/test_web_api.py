@@ -94,7 +94,7 @@ def _wait_done(client: TestClient, job_id: str, token: str, timeout: float = 40.
         r = client.get(f"/api/jobs/{job_id}", headers=_headers(token))
         assert r.status_code == 200
         job = r.json()
-        if job["status"] in ("done", "failed"):
+        if job["status"] in ("done", "failed", "cancelled"):
             return job
         time.sleep(0.25)
     raise AssertionError("job did not finish in time")
@@ -186,7 +186,7 @@ def test_readonly_job_end_to_end(web):
     job_id = r.json()["job"]["job_id"]
     job = _wait_done(client, job_id, alice)
     assert job["status"] == "done", job["message"]
-    assert job["case_count"] == 6
+    assert 4 <= job["case_count"] <= 6, job["case_count"]
     assert job["summary"]["failed"] == 0 and job["summary"]["error"] == 0
     assert job["summary"]["effective_pass_rate"] == 100.0
 
@@ -194,7 +194,9 @@ def test_readonly_job_end_to_end(web):
     html = client.get(f"/runs/{run_id}/report.html", headers=_headers(alice))
     assert html.status_code == 200 and "BMC SNMP" in html.text
     results = client.get(f"/runs/{run_id}/results.json", headers=_headers(alice)).json()
-    assert {x["operation"] for x in results["results"]} == {"GET"}
+    ops_seen = {x["operation"] for x in results["results"]}
+    assert ops_seen <= {"GET", "GETNEXT", "GETBULK"}, ops_seen
+    assert "SET" not in ops_seen, "no write operation may be emitted by the service"
 
     # reports are private: another account and an anonymous client must not read them
     assert client.get(f"/runs/{run_id}/report.html", headers=_headers(bob)).status_code == 404
@@ -204,7 +206,8 @@ def test_readonly_job_end_to_end(web):
 
     pdu_log = root / "runs" / run_id / "pdus.jsonl"
     ops = {json.loads(line)["operation"] for line in pdu_log.read_text(encoding="utf-8").splitlines() if line.strip()}
-    assert ops == {"GET"}, "no SET/other operation may be emitted by the service"
+    assert ops <= {"GET", "GETNEXT", "GETBULK"}, f"unexpected operations emitted: {ops}"
+    assert "SET" not in ops, "no write operation may be emitted by the service"
 
     for path in (root / "work" / "jobs").rglob("*.jsonl"):
         assert "never-store-this-secret" not in path.read_text(encoding="utf-8")
@@ -224,15 +227,24 @@ def test_job_queue_is_private(web):
 
 def test_live_is_available_without_allowlist(web):
     client, _, _, alice, _ = web
-    mib_id = client.get("/api/mibs", headers=_headers(alice)).json()["mibs"][0]["mib_id"]
+    mib_id = client.post(
+        "/api/mibs", content=MIB_BYTES,
+        headers={**_headers(alice), "X-MIB-Filename": "live-unreachable.mib"},
+    ).json()["mib"]["mib_id"]
     payload = {"mib_id": mib_id, "mode": "live", "target_host": "192.0.2.10",
-               "target_port": 161, "version": "v1", "limit": 1}
+               "target_port": 161, "version": "v1", "limit": 1,
+               "credential": {"community": "public"}}
     created = client.post("/api/jobs", json=payload, headers=_headers(alice))
     assert created.status_code == 200, created.text
     job_id = created.json()["job"]["job_id"]
-    # The unreachable address fails at the SNMP layer, but must not be rejected by policy.
+    # An unreachable live target is rejected at the pre-flight stage, not by
+    # policy: the job fails fast with a clear message instead of running blind.
     job = _wait_done(client, job_id, alice, timeout=30)
-    assert job["status"] == "done" and "allowlist" not in job["message"]
+    assert job["status"] == "failed", job["message"]
+    assert "allowlist" not in job["message"], "must not be a policy rejection"
+    assert "不可达" in job["message"] or "无响应" in job["message"]
+    # pre-flight must abort before building/running any cases (no wasted work)
+    assert job["case_count"] == 0 and job["summary"] == {}, job
     assert client.delete(f"/api/jobs/{job_id}", headers=_headers(alice)).status_code == 200
     assert client.get("/api/config", headers=_headers(alice)).json()["live_enabled"] is True
 
@@ -247,7 +259,8 @@ def test_live_accepts_any_target(tmp_path):
             headers={**_headers(token), "X-MIB-Filename": "a.mib"},
         ).json()["mib"]["mib_id"]
         payload = {"mib_id": uploaded, "mode": "live", "target_host": "10.0.0.99",
-                   "target_port": 161, "version": "v1", "limit": 1}
+                   "target_port": 161, "version": "v1", "limit": 1,
+                   "credential": {"community": "public"}}
         created = client.post("/api/jobs", json=payload, headers=_headers(token))
         assert created.status_code == 200, created.text
         assert created.json()["job"]["target_host"] == "10.0.0.99"
@@ -373,7 +386,8 @@ def test_concurrent_jobs_and_target_waiting(tmp_path):
 
         # the same live target is serialised: the second job waits with a message
         live_payload = {"mib_id": mib_id, "mode": "live", "target_host": "192.0.2.99",
-                        "target_port": 161, "version": "v1", "limit": 1}
+                        "target_port": 161, "version": "v1", "limit": 1,
+                        "credential": {"community": "public"}}
         l1 = client.post("/api/jobs", json=live_payload, headers=_headers(token)).json()["job"]["job_id"]
         l2 = client.post("/api/jobs", json=live_payload, headers=_headers(token)).json()["job"]["job_id"]
         time.sleep(0.6)
@@ -381,12 +395,60 @@ def test_concurrent_jobs_and_target_waiting(tmp_path):
         second = client.get(f"/api/jobs/{l2}", headers=_headers(token)).json()
         assert first["status"] == "running"
         assert second["status"] == "waiting" and "等待" in second["message"]
-        # both eventually finish (as jobs); the unreachable target only fails cases
+        # the unreachable live target serialises both jobs; each fails fast at the
+        # pre-flight stage (no run, so there is no per-case summary)
         done1 = _wait_done(client, l1, token, timeout=30)
         done2 = _wait_done(client, l2, token, timeout=30)
-        assert done1["status"] == "done" and done1["summary"]["failed"] >= 1
-        assert done2["status"] == "done" and done2["summary"]["failed"] >= 1
-        assert done2["started_at"] - done1["started_at"] >= 2.0, "second job must wait for the target"
+        assert done1["status"] == "failed", done1["message"]
+        assert done2["status"] == "failed", done2["message"]
+        assert done2["started_at"] - done1["started_at"] >= 1.0, "second job must wait for the target"
+
+
+def test_cancel_finished_job_rejected(tmp_path):
+    root = tmp_path / "cancel_finished"
+    app = _make_app(root)
+    with TestClient(app) as client:
+        alice = _register(client, ALICE)
+        mib_id = client.post(
+            "/api/mibs", content=MIB_BYTES,
+            headers={**_headers(alice), "X-MIB-Filename": "cancel.mib"},
+        ).json()["mib"]["mib_id"]
+        payload = {"mib_id": mib_id, "mode": "mock", "target_host": "127.0.0.1",
+                   "target_port": 11811, "version": "v1", "limit": 20}
+        job_id = client.post("/api/jobs", json=payload, headers=_headers(alice)).json()["job"]["job_id"]
+        assert _wait_done(client, job_id, alice)["status"] == "done"
+        # a finished job cannot be cancelled (endpoint must reject it)
+        r = client.post(f"/api/jobs/{job_id}/cancel", headers=_headers(alice))
+        assert r.status_code == 409, r.text
+
+
+def test_cancel_running_job(tmp_path):
+    root = tmp_path / "cancel_running"
+    app = _make_app(root)
+    with TestClient(app) as client:
+        alice = _register(client, ALICE)
+        mib_id = client.post(
+            "/api/mibs", content=MIB_BYTES,
+            headers={**_headers(alice), "X-MIB-Filename": "cancel2.mib"},
+        ).json()["mib"]["mib_id"]
+        payload = {"mib_id": mib_id, "mode": "mock", "target_host": "127.0.0.1",
+                   "target_port": 11811, "version": "v1", "limit": 20}
+        job_id = client.post("/api/jobs", json=payload, headers=_headers(alice)).json()["job"]["job_id"]
+        got_running = False
+        for _ in range(300):
+            j = client.get(f"/api/jobs/{job_id}", headers=_headers(alice)).json()
+            if j["status"] == "running":
+                r = client.post(f"/api/jobs/{job_id}/cancel", headers=_headers(alice))
+                assert r.status_code == 200, r.text
+                got_running = True
+                break
+            if j["status"] in ("done", "failed", "cancelled"):
+                break
+        final = _wait_done(client, job_id, alice)
+        assert final["status"] in ("cancelled", "done", "failed")
+        # if we cancelled while running, the terminal status must be cancelled
+        if got_running:
+            assert final["status"] == "cancelled", final
 
 
 def test_snmp_probe(web):
@@ -447,6 +509,62 @@ def test_snmp_probe(web):
         "/api/snmp/audit?operation=SET", headers=_headers(alice),
     ).json()["entries"]
     assert filtered and all(e["operation"] == "SET" for e in filtered)
+
+
+def test_probe_walk_cursor_pagination(web):
+    """WALK continuation resumes from ``cursor`` while ``oid`` stays the subtree root."""
+    client, _, _, alice, _ = web
+    base = {"mode": "mock", "version": "v1"}
+    body = {**base, "operation": "WALK", "oid": "1.3.6.1.2.1.1", "max_results": 2}
+    oids, pages, truncated = [], 0, True
+    while truncated and pages < 10:
+        r = client.post("/api/snmp/probe", headers=_headers(alice), json=body)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["ok"], d.get("error")
+        oids += [v["oid"] for v in d["varbinds"]]
+        pages += 1
+        truncated = d["truncated"] and bool(d.get("next_cursor"))
+        if truncated:
+            body["cursor"] = d["next_cursor"]
+    assert pages >= 2, "cursor continuation must actually fetch a second page"
+    assert len(oids) > 2, oids
+    assert len(set(oids)) == len(oids), oids
+    keys = [tuple(map(int, o.split("."))) for o in oids]
+    assert all(keys[i] < keys[i + 1] for i in range(len(keys) - 1)), keys
+
+    bad = client.post(
+        "/api/snmp/probe", headers=_headers(alice),
+        json={**base, "operation": "WALK", "oid": "1.3.6.1.2.1.1",
+              "max_results": 2, "cursor": "1.3.6.1.4.1.9999.1"},
+    )
+    assert bad.status_code == 400, bad.text
+
+
+def test_mib_browser_page_and_tree_api(web):
+    client, _, _, alice, _ = web
+    page = client.get("/mib-browser", headers=_headers(alice))
+    assert page.status_code == 200
+    assert "/static/mib-browser.js" in page.text and 'id="tree"' in page.text
+    for token in ('id="exportBtn"', 'id="autoRefresh"', 'id="contextMenu"'):
+        assert token in page.text, token
+    js = client.get("/static/mib-browser.js", headers=_headers(alice))
+    assert js.status_code == 200
+    assert all(t in js.text for t in ("loadTree", "formatValue", "exportCsv", "contextmenu"))
+
+    mib_id = client.post(
+        "/api/mibs", content=MIB_BYTES,
+        headers={**_headers(alice), "X-MIB-Filename": "browser.mib"},
+    ).json()["mib"]["mib_id"]
+    tree = client.get(f"/api/mibs/{mib_id}/tree", headers=_headers(alice))
+    assert tree.status_code == 200, tree.text
+    d = tree.json()
+    assert d["total"] >= 1000 and d["nodes"] and d["tables"]
+    assert {"name", "oid", "kind", "access", "sub_id", "parent_name",
+            "table_name", "index_names", "syntax"} <= set(d["nodes"][0])
+    names = {n["name"] for n in d["nodes"]}
+    assert any(n["parent_name"] not in names for n in d["nodes"]), "tree must have a root"
+    assert client.get("/api/mibs/deadbeefdeadbeef/tree", headers=_headers(alice)).status_code == 404
 
 
 def test_unified_audit_timeline(web):

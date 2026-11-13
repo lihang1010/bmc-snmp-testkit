@@ -78,9 +78,12 @@
     background:#f0f9ff;border:1px solid #e0f2fe;border-radius:5px;padding:1px 5px;white-space:nowrap}
   .muted{color:var(--muted)}
   .empty{padding:44px 10px;text-align:center;color:var(--faint);font-size:12px}
-  #toast{position:fixed;right:24px;bottom:24px;z-index:50;display:none;max-width:420px;
-    padding:12px 16px;border-radius:11px;background:var(--surface);border:1px solid var(--line);
-    border-left:3px solid var(--accent);box-shadow:0 18px 40px rgba(15,23,42,.16);font-size:12.5px}
+  #toast{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:100;display:none;
+    max-width:min(460px,calc(100vw - 32px));padding:13px 18px;border-radius:12px;font-weight:600;font-size:13px;
+    background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);
+    box-shadow:0 20px 48px rgba(15,23,42,.22);color:var(--text);animation:toast-in .25s ease-out}
+  #toast.bad{background:#fef2f2;border-color:#fecaca;border-left-color:var(--fail);color:#b91c1c}
+  @keyframes toast-in{from{opacity:0;transform:translateX(-50%) translateY(-12px)}to{opacity:1;transform:translateX(-50%)}}
   #toast.bad{border-left-color:var(--fail)}
   @media(max-width:760px){.filters{grid-template-columns:1fr 1fr}.filters>div:last-child,.filters>.btn{grid-column:1/-1}}
 </style>

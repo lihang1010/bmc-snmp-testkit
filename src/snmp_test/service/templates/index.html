@@ -273,16 +273,21 @@
     box-shadow:0 6px 16px rgba(220,38,38,.24)}
   .btn--danger-solid:hover:not(:disabled){box-shadow:0 8px 22px rgba(220,38,38,.32);filter:brightness(1.04)}
   #toast{
-    position:fixed;right:24px;bottom:24px;z-index:50;display:none;
-    max-width:min(420px,calc(100vw - 48px));
-    padding:12px 16px;border-radius:11px;
-    background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
-    box-shadow:0 18px 40px rgba(15,23,42,.16);color:var(--text);font-size:12.5px;
-    animation:toast-in .22s ease-out;
+    position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:100;display:none;
+    max-width:min(460px,calc(100vw - 32px));
+    padding:13px 18px;border-radius:12px;font-weight:600;font-size:13px;
+    background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);
+    box-shadow:0 20px 48px rgba(15,23,42,.22);color:var(--text);
+    animation:toast-in .25s ease-out;
   }
-  #toast.toast--bad{border-left-color:var(--fail)}
-  @keyframes toast-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  #toast.toast--bad{background:#fef2f2;border-color:#fecaca;border-left-color:var(--fail);color:#b91c1c}
+  @keyframes toast-in{from{opacity:0;transform:translateX(-50%) translateY(-12px)}to{opacity:1;transform:translateX(-50%)}}
   .hidden{display:none !important}
+  .checkbox{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);user-select:none}
+  .checkbox input{width:16px;height:16px;min-width:0;flex:none;margin:0;padding:0;accent-color:var(--accent);cursor:pointer}
+  .pbar{height:8px;background:var(--line);border-radius:6px;overflow:hidden;margin:4px 0 6px;max-width:220px}
+  .pbar-fill{height:100%;background:var(--accent);border-radius:6px;transition:width .3s ease}
+  .psub{font-size:11px;color:var(--muted);line-height:1.3}
   @media(max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}.col--full{grid-column:auto}}
   @media(max-width:620px){
     .topbar{padding:12px 16px}
@@ -307,6 +312,7 @@
     </div>
   </div>
   <div class="topbar-actions">
+    <a class="btn btn--ghost btn--sm" href="/mib-browser">MIB 浏览器</a>
     <a class="btn btn--ghost btn--sm" href="/audit">操作记录</a>
     <a class="btn btn--ghost btn--sm" href="/debug">SNMP 调试台</a>
     <div class="user-menu">
@@ -355,17 +361,18 @@
 
     <section class="col">
       <div class="card card--grow">
-        <div class="card-head"><span class="card-idx">03</span><h2>提交只读任务</h2><span class="pill">GET ONLY</span></div>
+        <div class="card-head"><span class="card-idx">03</span><h2>提交只读任务</h2><span class="pill">只读</span></div>
         <div class="form-grid">
           <div class="field span2"><label for="mode">模式</label><select id="mode"><option value="live">live（真实 BMC，内网直连）</option><option value="mock">mock（本地自测，不连设备）</option></select></div>
           <div class="field"><label for="host">目标 IP</label><input id="host" placeholder="真实 BMC IP"></div>
           <div class="field"><label for="port">端口</label><input id="port" type="number" value="161"></div>
           <div class="field"><label for="version">SNMP 版本</label><select id="version"><option>v1</option><option>v2c</option><option>v3</option></select></div>
           <div class="field"><label for="limit">用例上限</label><input id="limit" type="number" value="20" min="1" max="500"></div>
+          <div class="field span2"><label class="checkbox"><input type="checkbox" id="runAll"> 跑全量用例（不限数量，可能耗时较长）</label></div>
           <div class="field"><label for="mibId">MIB ID</label><input id="mibId" placeholder="从左侧列表选择或粘贴"></div>
           <div class="field"><label for="modules">模块过滤（可选）</label><input id="modules" placeholder="serverSysInfo,serverStatus"></div>
           <div id="v1cred" class="span2">
-            <label for="community">团体字（仅在内存中使用，不落盘）</label><input id="community" type="password" placeholder="v1 / v2c community">
+            <label for="community">团体字（仅在内存中使用，不落盘）</label><input id="community" type="text" value="rwcommstr" placeholder="v1 / v2c community">
           </div>
           <div id="v3cred" class="span2 hidden">
             <div class="row"><div class="field"><label for="v3user">v3 用户</label><input id="v3user"></div><div class="field"><label for="v3level">安全级别</label><select id="v3level"><option>authPriv</option><option>authNoPriv</option><option>noAuthNoPriv</option></select></div></div>
@@ -528,21 +535,33 @@
             auth_protocol:$('v3auth').value, priv_protocol:$('v3priv').value,
             auth_key:$('v3authkey').value, priv_key:$('v3privkey').value};
     } else { cred={community:$('community').value}; }
+    var runAll = $('runAll').checked;
+    var limitVal = parseInt($('limit').value, 10);
+    if(!runAll && (!limitVal || limitVal < 1)){ toast('请填写有效的用例上限（≥1），或勾选「跑全量用例」', true); return; }
     var body={
       mib_id:$('mibId').value.trim(), mode:$('mode').value,
       target_host:$('host').value.trim(), target_port:parseInt($('port').value||'161',10),
-      version:version, limit:parseInt($('limit').value||'20',10),
+      version:version, limit: runAll ? 0 : limitVal,
       modules:$('modules').value.split(',').map(function(s){return s.trim()}).filter(Boolean),
       credential:cred
     };
     if(!body.mib_id){ toast('请先选择 MIB', true); return; }
     if(body.mode==='live' && !body.target_host){ toast('请填写目标 BMC IP', true); return; }
+    if(body.mode==='live'){
+      if(version==='v3'){
+        if(!cred.v3_user){ toast('v3 模式请填写用户名', true); return; }
+        var lvl=cred.security_level||'authPriv';
+        if((lvl==='authNoPriv'||lvl==='authPriv') && !cred.auth_key){ toast('当前安全级别需要填写认证密钥', true); return; }
+        if(lvl==='authPriv' && !cred.priv_key){ toast('当前安全级别需要填写加密密钥', true); return; }
+      } else if(!cred.community){ toast('live 模式请填写团体名', true); return; }
+    }
     $('submitBtn').disabled=true;
     api('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(d){ toast('任务已入队: '+d.job.job_id); refresh(); setTimeout(refresh, 1500); })
       .catch(function(e){ toast('提交失败: '+e.message, true); })
       .finally(function(){ $('submitBtn').disabled=false; });
   });
+  $('runAll').addEventListener('change', function(){ $('limit').disabled = this.checked; });
 
   // ---- node / case viewer ----
   var viewerState = { mibId: '', tab: 'nodes', offset: 0, limit: 50,
@@ -769,6 +788,14 @@
         .catch(function(err){ toast('删除失败: '+err.message, true); });
     });
   });
+  $('jobBody').addEventListener('click', function(e){
+    var btn = e.target.closest('button[data-action=cancel-job]');
+    if(!btn || btn.disabled) return;
+    var jobId = btn.dataset.jobId;
+    api('/api/jobs/'+jobId+'/cancel', {method:'POST'})
+      .then(function(){ toast('已发送中断请求，任务将在下一个批次后停止'); refresh(); })
+      .catch(function(err){ toast('中断失败: '+err.message, true); });
+  });
   $('viewerCases').addEventListener('click', function(e){
     var main = e.target.closest('.row-main');
     var item = main && main.closest('.row-item.expandable');
@@ -804,7 +831,7 @@
     if(!$('confirmDialog').classList.contains('hidden')) closeConfirm(false);
   });
 
-  var STATUS_LABEL = {done:'完成', failed:'失败', running:'执行中', waiting:'等待中', queued:'排队中'};
+  var STATUS_LABEL = {done:'完成', failed:'失败', running:'执行中', waiting:'等待中', queued:'排队中', cancelled:'已中断'};
 
   // ---- quick SNMP probe inside the viewer ----
   var probeOp = 'GET';
@@ -881,7 +908,7 @@
   });
 
   function statusCell(s){
-    var cls = s==='done'?'ok':(s==='failed'?'fail':(s==='running'||s==='waiting'||s==='queued'?'warn':'muted'));
+    var cls = s==='done'?'ok':((s==='failed'||s==='cancelled')?'fail':((s==='running'||s==='waiting'||s==='queued')?'warn':'muted'));
     return '<span class="status status--'+cls+'">'+esc(STATUS_LABEL[s] || s)+'</span>';
   }
 
@@ -921,18 +948,36 @@
         var pending=false;
         $('jobBody').innerHTML=d.jobs.map(function(j){
           if(j.status==='queued'||j.status==='waiting'||j.status==='running') pending=true;
-          var s=j.summary||{}, rate=s.effective_pass_rate==null?0:s.effective_pass_rate;
+          var p=j.progress||{}, s=j.summary||{}, rate=s.effective_pass_rate==null?0:s.effective_pass_rate;
           var tone = rate>=100 ? '' : (rate>=60 ? ' warn' : ' fail');
-          var result = j.status==='done'
-            ? '<div class="rate'+(tone===' warn'?' rate--warn':(tone===' fail'?' rate--fail':''))+'">'+(s.passed||0)+'/'+(s.total||0)+' <span>'+rate+'%</span></div>'+
-              '<div class="bar'+(tone===' warn'?' bar--warn':(tone===' fail'?' bar--fail':''))+'"><i style="width:'+rate+'%"></i></div>'
-            : '<span class="muted">'+esc(j.message||'-')+'</span>';
+          var result;
+          if(j.status==='done'){
+            result = '<div class="rate'+(tone===' warn'?' rate--warn':(tone===' fail'?' rate--fail':''))+'">'+(s.passed||0)+'/'+(s.total||0)+' <span>'+rate+'%</span></div>'+
+              '<div class="bar'+(tone===' warn'?' bar--warn':(tone===' fail'?' bar--fail':''))+'"><i style="width:'+rate+'%"></i></div>';
+          } else if(j.status==='failed'){
+            result = '<span class="fail">失败</span> <span class="muted">'+esc(j.message||'')+'</span>';
+          } else if(j.status==='cancelled'){
+            result = '<span class="fail">已中断</span> <span class="muted">'+(p.total?('已执行 '+p.done+'/'+p.total):esc(j.message||''))+'</span>';
+          } else if(p.total){
+            var pct=Math.round(p.done/p.total*100);
+            result = '<div class="pbar"><div class="pbar-fill" style="width:'+pct+'%"></div></div>'+
+              '<div class="psub">'+p.done+'/'+p.total+' · 通过 <b>'+p.passed+'</b> · 失败 <b>'+p.failed+'</b></div>';
+          } else if(j.status==='waiting'){
+            result = '<span class="muted">等待目标释放…</span>';
+          } else if(j.status==='queued'){
+            result = '<span class="muted">排队中…</span>';
+          } else {
+            result = '<span class="ok">执行中…</span>';
+          }
           var report = j.run_id
             ? '<a class="link-btn" href="/runs/'+esc(j.run_id)+'/report.html" target="_blank">HTML</a> <a class="link-btn" href="/runs/'+esc(j.run_id)+'/results.json" target="_blank">JSON</a>'
             : '<span class="muted">—</span>';
-          var canDelete = j.status === 'done' || j.status === 'failed';
-          var actions = '<button class="btn btn--danger btn--sm" data-action="delete-job" data-job-id="'+esc(j.job_id)+'"'+(canDelete?'':' disabled')+'>删除</button>';
-          return '<tr><td><code>'+esc(j.job_id)+'</code><br><span class="muted">'+esc(j.mode)+' / '+esc(j.version)+' / '+j.limit+'</span></td>'+
+          var canDelete = j.status === 'done' || j.status === 'failed' || j.status === 'cancelled';
+          var canCancel = j.status === 'queued' || j.status === 'waiting' || j.status === 'running';
+          var actions = '';
+          if(canCancel){ actions += '<button class="btn btn--ghost btn--sm" data-action="cancel-job" data-job-id="'+esc(j.job_id)+'">中断</button>'; }
+          actions += '<button class="btn btn--danger btn--sm" data-action="delete-job" data-job-id="'+esc(j.job_id)+'"'+(canDelete?'':' disabled')+'>删除</button>';
+          return '<tr><td><code>'+esc(j.job_id)+'</code><br><span class="muted">'+esc(j.mode)+' / '+esc(j.version)+' / '+(j.limit===0?'全量':j.limit)+'</span></td>'+
             '<td>'+esc(j.user)+'<br><span class="muted"><code>'+esc(j.mib_id)+'</code></span></td>'+
             '<td>'+esc(j.target_host)+':'+j.target_port+'</td>'+
             '<td>'+statusCell(j.status)+'</td><td>'+result+'</td><td>'+report+'</td>'+

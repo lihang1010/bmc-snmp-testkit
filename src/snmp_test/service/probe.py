@@ -197,6 +197,7 @@ class ProbeService:
         mode = str(req.get("mode") or "mock").lower()
         operation = str(req.get("operation") or "GET").upper()
         oid = str(req.get("oid") or "").strip()
+        cursor = str(req.get("cursor") or "").strip()
         version = str(req.get("version") or "v1").lower()
 
         if mode not in ("mock", "live"):
@@ -207,6 +208,13 @@ class ProbeService:
             raise ProbeError("OID 格式不正确，应形如 1.3.6.1.4.1.52305.6.1")
         if version not in ("v1", "v2c", "v3"):
             raise ProbeError(f"不支持的 SNMP 版本 {version!r}")
+        if cursor:
+            if operation != "WALK":
+                raise ProbeError("cursor 仅用于 WALK 续页")
+            if not OID_RE.match(cursor):
+                raise ProbeError("cursor OID 格式不正确")
+            if not cursor.lstrip(".").startswith(oid.lstrip(".") + "."):
+                raise ProbeError("cursor 不在所请求的 OID 子树内")
 
         host = str(req.get("target_host") or "127.0.0.1")
 
@@ -240,9 +248,12 @@ class ProbeService:
             if operation == "WALK":
                 limit = max(1, min(int(req.get("max_results") or 50), MAX_WALK))
                 prefix = oid.lstrip(".")
-                cursor = oid
+                # ``oid`` stays the subtree root; ``cursor`` (when present) is
+                # the last OID of the previous page, so GETNEXT resumes exactly
+                # where it stopped instead of treating the last OID as a new root.
+                walk_cursor = cursor or oid
                 for _ in range(limit):
-                    step = await session.get_next([cursor])
+                    step = await session.get_next([walk_cursor])
                     if step.error_indication or step.error_status not in ("noError", "0"):
                         error = str(step.error_indication or step.error_status)
                         break
@@ -253,7 +264,7 @@ class ProbeService:
                     if not str(vb.oid).startswith(prefix + "."):
                         break
                     varbinds.append(vb)
-                    cursor = str(vb.oid)
+                    walk_cursor = str(vb.oid)
                 truncated = len(varbinds) >= limit
             else:
                 if operation == "GET":
@@ -280,6 +291,7 @@ class ProbeService:
             "varbinds": [vb.to_dict() for vb in varbinds],
             "count": len(varbinds),
             "truncated": truncated,
+            "next_cursor": str(varbinds[-1].oid) if truncated and varbinds else None,
             "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
         }
         self.audit.record({
@@ -289,6 +301,7 @@ class ProbeService:
             "version": version,
             "operation": operation,
             "oid": oid,
+            "cursor": cursor or None,
             "value": str(value) if operation == "SET" else None,
             "asn1": asn1 if operation == "SET" else None,
             "ok": result["ok"],

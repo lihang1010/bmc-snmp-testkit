@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  :root{
+    --bg:#f4f7fb;--surface:#fff;--surface-2:#f8fafc;--field:#fff;
+    --line:#e2e8f0;--line-soft:#eef2f7;
+    --text:#0f172a;--muted:#64748b;--faint:#94a3b8;
+    --accent:#0284c7;--ok:#059669;--warn:#d97706;--fail:#dc2626;
+    --shadow:0 1px 2px rgba(15,23,42,.04),0 10px 30px rgba(15,23,42,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;height:100vh;display:flex;flex-direction:column;overflow:hidden;color:var(--text);
+    font:14px/1.6 "Inter",ui-sans-serif,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:radial-gradient(900px 520px at 8% -12%,rgba(2,132,199,.07),transparent 60%),var(--bg)}
+  .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
+    padding:11px clamp(14px,2.2vw,28px);background:rgba(255,255,255,.86);backdrop-filter:blur(14px);
+    border-bottom:1px solid var(--line);flex:0 0 auto}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand-mark{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-weight:800;
+    font-size:11px;color:#fff;background:linear-gradient(135deg,#0ea5e9,#06b6d4)}
+  h1{font-size:16px;margin:0;font-weight:700}
+  .sub{color:var(--muted);font-size:11.5px;margin-top:2px}
+  .nav{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:650;
+    border:1px solid var(--line);color:var(--muted);background:var(--surface-2)}
+  label{display:block;color:var(--muted);font-size:11.5px;font-weight:600;margin:0 0 6px}
+  input,select{width:100%;height:34px;padding:0 11px;font:inherit;font-size:12.5px;color:var(--text);
+    background:var(--field);border:1px solid var(--line);border-radius:9px;outline:none;
+    transition:border-color .18s,box-shadow .18s}
+  input::placeholder{color:#a3b1c6}
+  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(2,132,199,.12)}
+  select{appearance:none;padding-right:32px;cursor:pointer;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%2364748b' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 11px center;background-size:12px}
+  button{font:inherit;cursor:pointer}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 14px;
+    border-radius:9px;font-size:12.5px;font-weight:650;border:1px solid transparent;white-space:nowrap;
+    transition:transform .12s,box-shadow .18s,background .18s,border-color .18s,opacity .18s}
+  .btn:active{transform:translateY(1px)}
+  .btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  .btn--sm{height:30px;padding:0 12px;font-size:12px}
+  .btn--primary{color:#fff;background:linear-gradient(135deg,#0ea5e9,#06b6d4);box-shadow:0 6px 16px rgba(14,165,233,.24)}
+  .btn--primary:hover:not(:disabled){filter:brightness(1.04)}
+  .btn--ghost{color:var(--text);background:var(--surface);border-color:var(--line)}
+  .btn--ghost:hover:not(:disabled){background:var(--surface-2)}
+  .hidden{display:none !important}
+  .auto-refresh{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);
+    white-space:nowrap;margin:0;cursor:pointer}
+  .auto-refresh input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent);cursor:pointer}
+  .auto-refresh input[type=number]{width:58px;height:28px;font-size:11.5px;padding:0 7px}
+  .tree-more{font-size:11px;color:var(--accent);cursor:pointer;padding:5px 10px;user-select:none}
+  .tree-more:hover{background:var(--surface-2)}
+  .ctx-menu{position:fixed;z-index:90;min-width:170px;padding:5px;background:var(--surface);
+    border:1px solid var(--line);border-radius:10px;box-shadow:0 16px 40px rgba(15,23,42,.2)}
+  .ctx-item{padding:7px 11px;font-size:12px;border-radius:6px;cursor:pointer;color:var(--text)}
+  .ctx-item:hover{background:#e0f2fe}
+  .ctx-sep{height:1px;background:var(--line-soft);margin:4px 2px}
+  .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 14px}
+  .grid>.span2{grid-column:span 2}
+  .mock-toggle{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:500;
+    color:var(--muted);cursor:pointer;margin:0}
+  .mock-toggle input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+  .conn-bar{flex:0 0 auto;padding:12px clamp(14px,2.2vw,28px);background:var(--surface);
+    border-bottom:1px solid var(--line)}
+  .toolbar{flex:0 0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:10px clamp(14px,2.2vw,28px);background:var(--surface);border-bottom:1px solid var(--line)}
+  .oid-row{display:flex;gap:8px;flex:1 1 620px;min-width:0}
+  .oid-row input{flex:1 1 auto;min-width:160px}
+  .oid-row .btn{flex:0 0 auto}
+  .walk-hint{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .walk-hint input{width:64px;height:28px;font-size:11.5px;padding:0 7px}
+  .workspace{flex:1 1 auto;display:flex;min-height:0;background:var(--bg)}
+  .tree-pane{width:340px;min-width:220px;max-width:70vw;display:flex;flex-direction:column;
+    background:var(--surface);border-right:1px solid var(--line);flex:0 0 auto}
+  .pane-head{padding:12px;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:8px}
+  .pane-info{padding:8px 12px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line-soft);
+    background:var(--surface-2)}
+  .tree-scroll{flex:1 1 auto;overflow:auto;padding:6px 0 30px}
+  .splitter{width:6px;cursor:col-resize;background:var(--line-soft);flex:0 0 auto;transition:background .15s}
+  .splitter:hover,.splitter.dragging{background:var(--accent)}
+  .result-pane{flex:1 1 auto;min-width:0;overflow:auto;padding:14px clamp(14px,2vw,24px) 40px}
+  .tree-node{display:flex;align-items:center;gap:6px;padding:4px 10px 4px 0;cursor:pointer;
+    font-size:12px;line-height:1.5;white-space:nowrap;border-left:2px solid transparent}
+  .tree-node:hover{background:var(--surface-2)}
+  .tree-node.selected{background:#e0f2fe;border-left-color:var(--accent)}
+  .tree-toggle{width:16px;flex:0 0 16px;text-align:center;color:var(--faint);font-size:9px;user-select:none}
+  .tree-toggle.leaf{visibility:hidden}
+  .tree-icon{width:15px;flex:0 0 15px;text-align:center;font-size:10px;font-weight:800}
+  .tree-icon.group{color:#7c3aed}.tree-icon.table{color:#0284c7}
+  .tree-icon.entry{color:#0891b2}.tree-icon.column{color:#059669}.tree-icon.scalar{color:#d97706}
+  .tree-name{font-weight:600;color:var(--text)}
+  .tree-oid{margin-left:auto;padding-left:10px;font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:10.5px;color:var(--faint)}
+  .tree-access{font-size:9.5px;color:var(--muted);border:1px solid var(--line);
+    border-radius:4px;padding:0 4px;line-height:15px}
+  .tree-empty{padding:28px 12px;text-align:center;color:var(--faint);font-size:12px}
+  .result-meta{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:11.5px;color:var(--muted)}
+  .result-meta b{color:var(--text);font-weight:650}
+  .badge{padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:700;border:1px solid transparent}
+  .badge--ok{color:#047857;background:#ecfdf5;border-color:#d1fae5}
+  .badge--fail{color:#b91c1c;background:#fef2f2;border-color:#fee2e2}
+  .view-tabs{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 0 12px;
+    border-bottom:1px solid var(--line-soft);margin-bottom:6px}
+  .view-tabs .muted{font-size:11px;font-weight:600;color:var(--text)}
+  .chk{font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+    user-select:none;border:1px solid var(--line);border-radius:8px;padding:4px 11px;background:var(--surface)}
+  .chk input{display:none}
+  .chk:has(input:checked){background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700}
+  .node-detail{margin:10px 0 4px;padding:10px 12px;border:1px solid var(--line-soft);border-radius:9px;
+    background:var(--surface-2);font-size:11.5px;color:var(--muted);line-height:1.7}
+  .node-detail:empty{display:none}
+  .node-detail b{color:var(--text)}
+  .table-scroll{overflow-x:auto;margin-top:10px}
+  table{width:100%;min-width:520px;border-collapse:separate;border-spacing:0;font-size:12.5px}
+  th{padding:0 10px 9px;text-align:left;color:var(--faint);font-size:10.5px;font-weight:700;
+    letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:8px 10px;border-bottom:1px solid var(--line-soft);vertical-align:middle;word-break:break-all}
+  tbody tr:hover{background:var(--surface-2)}
+  code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:#0369a1;
+    background:#f0f9ff;border:1px solid #e0f2fe;border-radius:5px;padding:1px 5px;white-space:nowrap}
+  .value{font-weight:650}
+  .muted{color:var(--muted)}
+  .empty{padding:38px 10px;text-align:center;color:var(--faint);font-size:12px}
+  .tbl-block{margin:16px 0 4px}
+  .tbl-title{font-size:12.5px;font-weight:700;color:var(--text);margin:0 0 8px 2px}
+  .tbl-title .cnt{color:var(--muted);font-weight:600}
+  .note{margin:10px 0;padding:9px 12px;border-radius:9px;border:1px solid var(--line-soft);
+    background:var(--surface-2);color:var(--muted);font-size:11.5px}
+  .note.warn{border-color:#fde68a;background:#fffbeb;color:#92400e}
+  #toast{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:100;display:none;
+    max-width:min(460px,calc(100vw - 32px));padding:12px 18px;border-radius:12px;font-weight:600;font-size:13px;
+    background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);
+    box-shadow:0 20px 48px rgba(15,23,42,.22);color:var(--text)}
+  #toast.bad{background:#fef2f2;border-color:#fecaca;border-left-color:var(--fail);color:#b91c1c}
+  @media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.oid-row{flex-basis:100%}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">SN</div>
+    <div><h1>MIB 浏览器</h1><div class="sub">导入 MIB · 展开 OID 树 · 表格化查看返回值</div></div>
+  </div>
+  <div class="nav">
+    <span class="pill" id="statusPill">加载中…</span>
+    <a class="btn btn--ghost btn--sm" href="/debug">SNMP 调试台</a>
+    <a class="btn btn--ghost btn--sm" href="/audit">操作记录</a>
+    <a class="btn btn--ghost btn--sm" href="/">返回控制台</a>
+  </div>
+</header>
+
+<div class="conn-bar">
+  <div class="grid">
+    <div><label for="host">目标 IP</label><input id="host" placeholder="真实 BMC IP，例如 10.20.30.40"></div>
+    <div><label for="port">端口</label><input id="port" type="number" value="161"></div>
+    <div><label for="version">SNMP 版本</label><select id="version"><option>v1</option><option>v2c</option><option>v3</option></select></div>
+    <div><label for="community">团体字</label><input id="community" value="rwcommstr" type="text"></div>
+    <div class="span2 hidden" id="v3box"><div class="grid">
+      <div><label for="v3user">v3 用户</label><input id="v3user"></div>
+      <div><label for="securityLevel">安全级别</label><select id="securityLevel"><option>authPriv</option><option>authNoPriv</option><option>noAuthNoPriv</option></select></div>
+      <div><label for="authProtocol">认证协议</label><select id="authProtocol"><option>SHA</option><option>MD5</option><option>SHA256</option></select></div>
+      <div><label for="privProtocol">加密协议</label><select id="privProtocol"><option>AES128</option><option>DES</option><option>AES256</option></select></div>
+      <div><label for="authKey">认证密钥</label><input id="authKey" type="password"></div>
+      <div><label for="privKey">加密密钥</label><input id="privKey" type="password"></div>
+    </div></div>
+    <div class="span2"><label class="mock-toggle"><input id="localMock" type="checkbox"> 本地自测（改用模拟 Agent，不连真实设备）</label></div>
+  </div>
+</div>
+
+<div class="toolbar">
+  <div class="oid-row">
+    <input id="oid" placeholder="OID（点击左侧节点自动填入）">
+    <button class="btn btn--ghost" type="button" id="getBtn">GET</button>
+    <button class="btn btn--ghost" type="button" id="nextBtn">GETNEXT</button>
+    <button class="btn btn--primary" type="button" id="walkBtn">WALK</button>
+    <button class="btn btn--ghost" type="button" id="tableBtn">Table View</button>
+    <button class="btn btn--ghost" type="button" id="refreshBtn">刷新</button>
+    <button class="btn btn--ghost" type="button" id="exportBtn">导出 CSV</button>
+  </div>
+  <div class="walk-hint">WALK <input id="maxResults" type="number" value="200" min="1" max="200"> 条/页，截断自动续页</div>
+  <label class="auto-refresh"><input id="autoRefresh" type="checkbox"> 自动刷新 <input id="refreshSeconds" type="number" value="10" min="2" max="600"> 秒</label>
+</div>
+
+<div class="workspace" id="workspace">
+  <aside class="tree-pane" id="treePane">
+    <div class="pane-head">
+      <select id="mibSelect"></select>
+      <input id="treeQuery" placeholder="搜索节点名 / OID">
+    </div>
+    <div id="treeInfo" class="pane-info">加载 MIB 中…</div>
+    <div class="tree-scroll" id="tree"></div>
+  </aside>
+  <div class="splitter" id="splitter" title="拖动调整宽度"></div>
+  <main class="result-pane">
+    <div class="result-meta" id="resultMeta"><span class="muted">选择左侧节点或填写 OID 后执行探测</span></div>
+    <div class="view-tabs" id="viewTabs">
+      <span class="muted">视图</span>
+      <label class="chk"><input type="radio" name="view" value="smart" checked> Table View（表格）</label>
+      <label class="chk"><input type="radio" name="view" value="tableonly"> 仅表格</label>
+      <label class="chk"><input type="radio" name="view" value="raw"> Raw（原始 OID）</label>
+    </div>
+    <div class="node-detail" id="nodeDetail"></div>
+    <div class="table-scroll" id="resultScroll"><div class="empty">执行探测后在这里显示结果</div></div>
+  </main>
+</div>
+<div id="contextMenu" class="ctx-menu hidden">
+  <div class="ctx-item" data-act="walk">WALK 此节点</div>
+  <div class="ctx-item" data-act="get">GET（标量补 .0）</div>
+  <div class="ctx-item" data-act="next">GETNEXT</div>
+  <div class="ctx-item" data-act="table">Table View（整表）</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" data-act="copyOid">复制 OID</div>
+  <div class="ctx-item" data-act="copyName">复制节点名</div>
+</div>
+<div id="toast"></div>
+<script src="/static/mib-browser.js"></script>
+</body>
+</html>

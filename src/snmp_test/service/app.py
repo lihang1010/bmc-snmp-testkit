@@ -21,6 +21,7 @@ from typing import Any
 import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -80,6 +81,7 @@ class ProbeRequest(BaseModel):
     value: str | None = None
     asn1: str = "OctetString"
     max_results: int = 50
+    cursor: str | None = None
 
 
 def _web_security(config_path: Path) -> dict[str, Any]:
@@ -108,11 +110,12 @@ def create_app(
     library = MibLibrary(workspace, workspace / "config" / "safety-policy.yaml")
     store = JobStore(workspace)
     workers = int(os.environ.get("SNMP_TEST_WEB_WORKERS", "2") or 2)
+    probe = ProbeService(workspace, cfg_path, library=library, web_security=security_cfg)
     runner = JobRunner(
         workspace, library, store,
         config_path=cfg_path, web_security=security_cfg, workers=workers,
+        probe=probe,
     )
-    probe = ProbeService(workspace, cfg_path, library=library, web_security=security_cfg)
     audit_feed = AuditFeed(workspace)
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -136,6 +139,10 @@ def create_app(
     app.state.security = security_cfg
     app.state.workspace = workspace
     app.state.templates = templates
+
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     def require(request: Request, action: str = "read") -> User:
         user = auth.authenticate(_token(request))
@@ -300,6 +307,45 @@ def create_app(
             "nodes": matched[offset: offset + limit],
         }
 
+    @app.get("/api/mibs/{mib_id}/tree")
+    async def get_tree(mib_id: str, request: Request):
+        """Return every node of a MIB in one request for the browser's tree view.
+
+        /nodes is paged (<=200) and aimed at search UIs; a 1000+ node tree would
+        otherwise need several round-trips to assemble.  Node fields are trimmed
+        to what the tree/table renderer actually consumes.
+        """
+        require(request)
+        try:
+            path = library.model_path(mib_id)
+        except MibError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if not path.is_file():
+            raise HTTPException(404, "MIB 不存在")
+        try:
+            model = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise HTTPException(500, f"model.json 读取失败: {exc}") from exc
+        keys = ("name", "oid", "kind", "access", "sub_id", "parent_name",
+                "table_name", "index_names")
+        nodes = []
+        for n in model.get("nodes") or []:
+            node = {k: n.get(k) for k in keys}
+            syn = n.get("syntax") or None
+            node["syntax"] = (
+                {k: syn.get(k) for k in ("base_type", "enum", "ranges", "size", "raw")}
+                if syn else None
+            )
+            nodes.append(node)
+        return {
+            "mib_id": mib_id,
+            "module_name": model.get("module_name", ""),
+            "root_oid": model.get("root_oid", ""),
+            "total": len(nodes),
+            "nodes": nodes,
+            "tables": model.get("tables") or [],
+        }
+
     @app.get("/api/mibs/{mib_id}/cases")
     async def get_cases(
         mib_id: str,
@@ -396,10 +442,24 @@ def create_app(
             raise HTTPException(400, f"version must be one of {VERSIONS}")
         if payload.mode not in ("mock", "live"):
             raise HTTPException(400, "mode must be 'mock' or 'live'")
-        if not (1 <= payload.limit <= MAX_LIMIT):
-            raise HTTPException(400, f"limit must be between 1 and {MAX_LIMIT}")
+        if not (0 <= payload.limit <= MAX_LIMIT):
+            raise HTTPException(400, f"limit must be 0 (full run) or between 1 and {MAX_LIMIT}")
         if not (1 <= payload.target_port <= 65535):
             raise HTTPException(400, "invalid target_port")
+        if payload.mode == "live":
+            # Live targets require complete credentials; mock mode uses built-ins.
+            cred = payload.credential or {}
+            if payload.version in ("v1", "v2c"):
+                if not str(cred.get("community") or "").strip():
+                    raise HTTPException(400, "live 模式 v1/v2c 必须填写团体名")
+            else:
+                if not str(cred.get("v3_user") or "").strip():
+                    raise HTTPException(400, "live 模式 v3 必须填写用户名")
+                level = str(cred.get("security_level") or "authPriv")
+                if level in ("authNoPriv", "authPriv") and not str(cred.get("auth_key") or "").strip():
+                    raise HTTPException(400, "当前 v3 安全级别必须填写认证密钥")
+                if level == "authPriv" and not str(cred.get("priv_key") or "").strip():
+                    raise HTTPException(400, "当前 v3 安全级别必须填写加密密钥")
         for module in payload.modules:
             if not MODULE_RE.match(module):
                 raise HTTPException(400, f"invalid module name {module!r}")
@@ -448,6 +508,17 @@ def create_app(
         await run_in_threadpool(store.delete, job_id)
         store.audit_log({"event": "job_deleted", "user": user.email, "job_id": job_id})
         return {"deleted": job_id}
+
+    @app.post("/api/jobs/{job_id}/cancel")
+    async def cancel_job(job_id: str, request: Request):
+        user = require(request, "write")
+        job = store.get(job_id)
+        if job is None or job.user != user.email:
+            raise HTTPException(404, "job not found")
+        if job.status not in ("queued", "waiting", "running"):
+            raise HTTPException(409, "任务已结束，无法中断")
+        runner.request_cancel(job_id)
+        return {"job": job.public_dict()}
 
     # ------------------------------------------------------------- reports
     @app.get("/runs/{run_id}/report.html")
@@ -498,6 +569,14 @@ def create_app(
             return RedirectResponse("/login", status_code=302)
         return templates.TemplateResponse(
             request, "debug.html", {"title": "SNMP 调试台 · bmc-snmp-testkit"}
+        )
+
+    @app.get("/mib-browser", response_class=HTMLResponse)
+    async def mib_browser_page(request: Request):
+        if auth.authenticate(_token(request)) is None:
+            return RedirectResponse("/login", status_code=302)
+        return templates.TemplateResponse(
+            request, "mib_browser.html", {"title": "MIB 浏览器 · bmc-snmp-testkit"}
         )
 
     @app.get("/", response_class=HTMLResponse)

@@ -8,13 +8,14 @@ import json
 from pathlib import Path
 
 import pytest
+from dataclasses import replace
 
 from snmp_test.config import Config, load_config
 from snmp_test.generator.case_builder import GeneratorOptions, generate_cases
 from snmp_test.generator.trap_cases import generate_trap_cases, load_expectations
 from snmp_test.model.mib_model import build_model
 from snmp_test.report.writers import write_all
-from snmp_test.runner.executor import Runtime
+from snmp_test.runner.executor import Runtime, run_batch
 from snmp_test.runner.safety import load_policy
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -138,3 +139,41 @@ def test_dry_run_sends_no_pdus(tmp_path: Path):
         loop.close()
         asyncio.set_event_loop(None)
     assert results and all(r.status == "skipped" and "dry-run" in r.message for r in results)
+
+
+def test_run_batch_cancel(tmp_path: Path):
+    """Cancelling mid-run stops after the in-flight batch and keeps partial results."""
+    cfg = _isolated_config(tmp_path)
+    model = build_model(cfg.mib_path)
+    base = _selected_cases(model, cfg)
+    read_only = [c for c in base if c.operation in ("GET", "GETNEXT", "GETBULK")]
+    assert read_only, "fixture must include read-only cases"
+    cases: list = []
+    i = 0
+    while len(cases) < 120:
+        tmpl = read_only[i % len(read_only)]
+        c = replace(tmpl, case_id=f"cancel-{i}")
+        cases.append(c)
+        i += 1
+    assert len(cases) >= 51, len(cases)  # spans more than one batch (chunk=50)
+    evt = asyncio.Event()
+
+    def cb(done, total, passed, failed):
+        evt.set()  # request cancellation as soon as the first case finishes
+
+    async def body():
+        runtime, results = await run_batch(
+            cfg, model, cases, on_progress=cb, cancel_event=evt,
+        )
+        return results
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        results = loop.run_until_complete(body())
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+    # Cancellation must stop after the in-flight batch (<=50) and before the rest.
+    assert 0 < len(results) <= 50, len(results)
+    assert len(results) < len(cases), len(results)

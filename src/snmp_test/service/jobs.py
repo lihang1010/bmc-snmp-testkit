@@ -25,6 +25,7 @@ from snmp_test.runner.executor import make_run_id, run_batch
 from snmp_test.runner.safety import load_policy
 from snmp_test.security import SecurityPolicy
 from snmp_test.service.mibs import MibLibrary
+from snmp_test.service.probe import ProbeService
 
 WEB_MOCK_PORT = 11811
 WEB_TRAP_PORT = 11812
@@ -56,6 +57,7 @@ class Job:
     run_id: str | None = None
     case_count: int = 0
     summary: dict[str, Any] = field(default_factory=dict)
+    progress: dict[str, Any] = field(default_factory=dict)
     message: str = ""
 
     def public_dict(self) -> dict[str, Any]:
@@ -78,6 +80,7 @@ class Job:
             "case_count": self.case_count,
             "summary": self.summary,
             "message": self.message,
+            "progress": self.progress,
         }
 
 
@@ -179,17 +182,20 @@ class JobRunner:
         config_path: str | Path | None = None,
         web_security: dict[str, Any] | None = None,
         workers: int = 2,
+        probe: ProbeService | None = None,
     ) -> None:
         self.root = Path(root)
         self.library = library
         self.store = store
         self.config_path = Path(config_path) if config_path else self.root / "config" / "web.yaml"
         self.web_security = dict(web_security or {})
+        self.probe = probe
         self.queue: asyncio.Queue[Job | None] = asyncio.Queue()
         self.workers = max(1, min(int(workers), MAX_WORKERS))
         self._tasks: list[asyncio.Task] = []
         self._current: dict[int, str] = {}
         self._target_locks: dict[str, asyncio.Lock] = {}
+        self._cancel: dict[str, asyncio.Event] = {}
 
     @property
     def current_jobs(self) -> list[str]:
@@ -214,6 +220,27 @@ class JobRunner:
 
     async def submit(self, job: Job) -> None:
         await self.queue.put(job)
+
+    def request_cancel(self, job_id: str) -> None:
+        """Flag a running/queued job to stop at the next batch boundary.
+
+        Safe to call from a request handler: it only flips an asyncio.Event and
+        updates the in-memory job record.  The worker task observes the event and
+        stops submitting further batches; already-in-flight batches finish so we
+        keep their partial results.
+        """
+        evt = self._cancel.setdefault(job_id, asyncio.Event())
+        evt.set()
+        job = self.store.get(job_id)
+        if job is not None and job.status in ("queued", "waiting", "running"):
+            job.status = "cancelled"
+            job.finished_at = time.time()
+            job.message = "任务已被用户中断"
+            self.store.update(job)
+            self.store.audit_log({
+                "event": "job_cancelled", "job_id": job_id, "user": job.user,
+                "mib_id": job.mib_id, "target": job.target_host,
+            })
 
     def pending(self) -> int:
         return self.queue.qsize()
@@ -265,6 +292,7 @@ class JobRunner:
             })
         finally:
             self._current.pop(slot, None)
+            self._cancel.pop(job.job_id, None)
 
     def _build_config(self, job: Job, slot: int = 0):
         model_path = self.library.model_path(job.mib_id)
@@ -338,19 +366,67 @@ class JobRunner:
         if job.mode not in ("mock", "live"):
             raise ValueError(f"unsupported mode {job.mode!r}")
 
+        # Pre-flight reachability check for live targets: a live device that does
+        # not answer SNMP would otherwise produce an all-failing job.  Probe it
+        # with a single GET and abort early with a clear message instead of
+        # wasting a full run on an unreachable target.
+        if job.mode == "live" and self.probe is not None:
+            try:
+                presult = await self.probe.execute(
+                    {
+                        "mode": "live",
+                        "target_host": job.target_host,
+                        "target_port": job.target_port,
+                        "version": job.version,
+                        "operation": "GET",
+                        "oid": "1.3.6.1.2.1.1.3.0",
+                        "credential": job.credential,
+                    },
+                    job.user,
+                )
+                perr = presult.get("error")
+            except Exception as exc:
+                perr = f"{type(exc).__name__}: {exc}"
+            if perr:
+                job.status = "failed"
+                job.finished_at = time.time()
+                job.message = (
+                    f"目标 {job.target_host}:{job.target_port} 不可达或 SNMP 无响应"
+                    f"（{perr}），任务已终止"
+                )
+                self.store.update(job)
+                self.store.audit_log({
+                    "event": "job_failed", "job_id": job.job_id, "user": job.user,
+                    "mib_id": job.mib_id, "target": job.target_host,
+                    "mode": job.mode, "reason": "unreachable", "error": job.message,
+                })
+                return
+
         cfg, model = self._build_config(job, slot)
-        cases = self.library.load_cases(job.mib_id).select(
-            CaseFilter(
-                operations={"GET"},
+        # Read-only operation set: GET / GETNEXT / GETBULK (the two SNMP walk
+        # primitives).  All three are zero-risk read operations.  We sample each
+        # operation up to an even share of the limit so walk cases are not
+        # crowded out when a MIB happens to have far more GET cases than walk
+        # cases.  The overall limit is still enforced as a hard ceiling.
+        read_ops = ("GET", "GETNEXT", "GETBULK")
+        case_store = self.library.load_cases(job.mib_id)
+        per_op = (job.limit // len(read_ops)) if job.limit else 0
+        if per_op < 1 and job.limit:
+            per_op = 1
+        cases: list = []
+        for op in read_ops:
+            cases.extend(case_store.select(CaseFilter(
+                operations={op},
                 categories={"normal"},
                 versions={job.version},
                 modules=set(job.modules),
                 exclude_tags={"auth", "flood", "negative", "guarded", "blocked"},
-                limit=job.limit,
-            )
-        )
+                limit=per_op,
+            )))
+        if job.limit:
+            cases = cases[: job.limit]
         if not cases:
-            raise ValueError("no read-only GET cases matched the requested filters")
+            raise ValueError("no read-only GET/GETNEXT/GETBULK cases matched the requested filters")
         job.case_count = len(cases)
 
         security = SecurityPolicy(
@@ -359,13 +435,23 @@ class JobRunner:
             readonly_only=True,
         )
         run_id = f"web-{job.job_id}"
+
+        def _on_progress(done: int, total: int, passed: int, failed: int) -> None:
+            # Live progress stays in memory only; the final summary is what gets
+            # persisted to the journal when the job finishes.
+            job.progress = {"done": done, "total": total, "passed": passed, "failed": failed}
+
+        evt = self._cancel.setdefault(job.job_id, asyncio.Event())
         runtime, _ = await run_batch(
             cfg, model, cases,
             run_id=run_id,
             enable_set=False,
             allow_guarded=False,
             security=security,
+            on_progress=_on_progress,
+            cancel_event=evt,
         )
+        cancelled = evt.is_set()
         try:
             write_all(
                 runtime.collector,
@@ -378,8 +464,12 @@ class JobRunner:
             summary = runtime.collector.summary()["overall"]
             job.summary = summary
             job.run_id = run_id
-            job.status = "done"
-            job.message = f"{summary['passed']}/{summary['total']} passed, effective {summary['effective_pass_rate']}%"
+            if cancelled:
+                job.status = "cancelled"
+                job.message = job.message or "任务已被用户中断"
+            else:
+                job.status = "done"
+                job.message = f"{summary['passed']}/{summary['total']} passed, effective {summary['effective_pass_rate']}%"
         finally:
             runtime.close()
 
