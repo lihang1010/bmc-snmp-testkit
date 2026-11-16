@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .mib_deps import standard_oids
 from .mib_parser import MibParser, ParsedMib
 from .types import MibModel, MibNode, SyntaxSpec
 
@@ -54,6 +55,10 @@ def build_model(path: str | Path, root_oid: str | None = None) -> MibModel:
     assignments = [d for d in parsed.definitions if d.parent_name and d.kind != "sequence_type"]
     pending = list(assignments)
     oid_of: dict[str, str] = dict(BUILTIN_OIDS)
+    # Standard MIBs reference parents imported from other modules (mib-2,
+    # ifMIB, snmpModules, ...).  The built-in offline dependency set supplies
+    # their numeric OIDs so those nodes are no longer dropped as unresolved.
+    oid_of.update(standard_oids())
     resolved: dict[str, Any] = {}
     progress = True
     while pending and progress:

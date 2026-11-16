@@ -314,7 +314,6 @@
   <div class="topbar-actions">
     <a class="btn btn--ghost btn--sm" href="/mib-browser">MIB 浏览器</a>
     <a class="btn btn--ghost btn--sm" href="/audit">操作记录</a>
-    <a class="btn btn--ghost btn--sm" href="/debug">SNMP 调试台</a>
     <div class="user-menu">
       <button id="userBtn" class="user-box" type="button" aria-haspopup="true" aria-expanded="false">
         <span id="userBox" class="user-email">未登录</span>
@@ -363,7 +362,6 @@
       <div class="card card--grow">
         <div class="card-head"><span class="card-idx">03</span><h2>提交只读任务</h2><span class="pill">只读</span></div>
         <div class="form-grid">
-          <div class="field span2"><label for="mode">模式</label><select id="mode"><option value="live">live（真实 BMC，内网直连）</option><option value="mock">mock（本地自测，不连设备）</option></select></div>
           <div class="field"><label for="host">目标 IP</label><input id="host" placeholder="真实 BMC IP"></div>
           <div class="field"><label for="port">端口</label><input id="port" type="number" value="161"></div>
           <div class="field"><label for="version">SNMP 版本</label><select id="version"><option>v1</option><option>v2c</option><option>v3</option></select></div>
@@ -437,7 +435,7 @@
         </div>
         <div class="probe-actions">
           <button id="probeRun" class="btn btn--primary btn--sm" type="button">执行</button>
-          <a class="btn btn--ghost btn--sm" href="/debug" target="_blank">打开完整调试台</a>
+          <a class="btn btn--ghost btn--sm" href="/mib-browser" target="_blank">打开 MIB 浏览器</a>
         </div>
         <div id="probeResult" class="probe-result"><span class="muted">尚未执行探测</span></div>
       </div>
@@ -539,14 +537,14 @@
     var limitVal = parseInt($('limit').value, 10);
     if(!runAll && (!limitVal || limitVal < 1)){ toast('请填写有效的用例上限（≥1），或勾选「跑全量用例」', true); return; }
     var body={
-      mib_id:$('mibId').value.trim(), mode:$('mode').value,
+      mib_id:$('mibId').value.trim(), mode:'live',
       target_host:$('host').value.trim(), target_port:parseInt($('port').value||'161',10),
       version:version, limit: runAll ? 0 : limitVal,
       modules:$('modules').value.split(',').map(function(s){return s.trim()}).filter(Boolean),
       credential:cred
     };
     if(!body.mib_id){ toast('请先选择 MIB', true); return; }
-    if(body.mode==='live' && !body.target_host){ toast('请填写目标 BMC IP', true); return; }
+    if(!body.target_host){ toast('请填写目标 BMC IP', true); return; }
     if(body.mode==='live'){
       if(version==='v3'){
         if(!cred.v3_user){ toast('v3 模式请填写用户名', true); return; }
@@ -850,7 +848,7 @@
          auth_key:$('v3authkey').value, priv_key:$('v3privkey').value}
       : {community:$('community').value};
     return {
-      mode:$('mode').value, target_host:$('host').value.trim(),
+      mode:'live', target_host:$('host').value.trim(),
       target_port:parseInt($('port').value || '161', 10),
       version:version, credential:cred
     };
@@ -877,8 +875,8 @@
       value:$('probeValue').value, asn1:$('probeAsn1').value, max_results:50
     });
     if(!body.oid){ toast('请填写 OID', true); return; }
-    if(body.mode==='live' && !body.target_host){
-      toast('请填写目标 BMC IP；或将模式切为 mock 本地自测', true); return;
+    if(!body.target_host){
+      toast('请填写目标 BMC IP', true); return;
     }
     $('probeRun').disabled = true;
     api('/api/snmp/probe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
@@ -896,9 +894,9 @@
   $('probeRun').addEventListener('click', function(){
     if(probeOp !== 'SET'){ runProbe(); return; }
     var t = probeTarget();
-    var target = t.mode === 'live' ? t.target_host+':'+t.target_port : '本地模拟 Agent';
+    var target = t.target_host+':'+t.target_port;
     askConfirm('将向 '+target+' 写入 '+$('probeOid').value.trim()+' = '+$('probeValue').value+
-      '（'+$('probeAsn1').value+'）。'+(t.mode==='live'?'这会修改真实设备配置，请再次确认。':'仅修改本机内存数据。'))
+      '（'+$('probeAsn1').value+'）。这会修改真实设备配置，请再次确认。')
       .then(function(ok){ if(ok) runProbe(); });
   });
   $('viewerNodes').addEventListener('click', function(e){

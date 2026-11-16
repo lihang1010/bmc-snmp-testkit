@@ -26,6 +26,7 @@ from snmp_test.runner.safety import load_policy
 from snmp_test.security import SecurityPolicy
 from snmp_test.service.mibs import MibLibrary
 from snmp_test.service.probe import ProbeService
+from snmp_test.service.web_policy import WebPolicy
 
 WEB_MOCK_PORT = 11811
 WEB_TRAP_PORT = 11812
@@ -189,6 +190,7 @@ class JobRunner:
         self.store = store
         self.config_path = Path(config_path) if config_path else self.root / "config" / "web.yaml"
         self.web_security = dict(web_security or {})
+        self.policy = WebPolicy.from_security(self.web_security)
         self.probe = probe
         self.queue: asyncio.Queue[Job | None] = asyncio.Queue()
         self.workers = max(1, min(int(workers), MAX_WORKERS))
@@ -342,8 +344,8 @@ class JobRunner:
                 "allow_guarded": False, "enable_set": False, "limit": 0, "seed": 20261109,
             },
             "security": {
-                "allow_live": True,
-                "allowed_targets": [host] if job.mode == "live" else [],
+                "allow_live": self.policy.allow_live,
+                "allowed_targets": (list(self.policy.allowed_targets) or [host]) if job.mode == "live" else [],
                 "readonly_only": True,
             },
             "report": {"output_dir": "runs", "pdu_log_sample_rate": 1.0, "log_level": "INFO"},
@@ -430,8 +432,8 @@ class JobRunner:
         job.case_count = len(cases)
 
         security = SecurityPolicy(
-            allow_live=True,
-            allowed_targets=(job.target_host,) if job.mode == "live" else (),
+            allow_live=self.policy.allow_live,
+            allowed_targets=self.policy.allowed_targets or ((job.target_host,) if job.mode == "live" else ()),
             readonly_only=True,
         )
         run_id = f"web-{job.job_id}"

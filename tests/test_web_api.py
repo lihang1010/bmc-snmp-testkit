@@ -16,6 +16,7 @@ from snmp_test.service.app import COOKIE, create_app
 
 ROOT = Path(__file__).resolve().parents[1]
 MIB_BYTES = (ROOT / "TTY-T1ZDG-v1.0_20261026.mib").read_bytes()
+STANDARD_MIB = (ROOT / "tests" / "fixtures" / "TEST-IF-MIB.mib").read_bytes()
 
 ALICE = "alice@example.com"
 BOB = "bob@example.com"
@@ -546,11 +547,29 @@ def test_mib_browser_page_and_tree_api(web):
     page = client.get("/mib-browser", headers=_headers(alice))
     assert page.status_code == 200
     assert "/static/mib-browser.js" in page.text and 'id="tree"' in page.text
-    for token in ('id="exportBtn"', 'id="autoRefresh"', 'id="contextMenu"'):
+    for token in ('id="exportBtn"', 'id="autoRefresh"', 'id="contextMenu"',
+                  'id="setBtn"', 'id="setDialog"', 'id="setValue"', 'data-act="set"'):
         assert token in page.text, token
     js = client.get("/static/mib-browser.js", headers=_headers(alice))
     assert js.status_code == 200
-    assert all(t in js.text for t in ("loadTree", "formatValue", "exportCsv", "contextmenu"))
+    assert all(t in js.text for t in (
+        "loadTree", "formatValue", "exportCsv", "contextmenu",
+        "openSetDialog", "instanceRows", "childrenOf",
+    ))
+
+    # Debug console and the "local self-test" switch are gone from the web UI.
+    assert client.get("/debug", headers=_headers(alice)).status_code == 404
+    pages = (
+        page.text,
+        client.get("/", headers=_headers(alice)).text,
+        client.get("/audit", headers=_headers(alice)).text,
+    )
+    for text in pages:
+        assert 'href="/debug"' not in text
+        assert "本地自测" not in text
+        assert "localMock" not in text
+    assert "localMock" not in js.text
+    assert "mock（本地自测" not in pages[1]
 
     mib_id = client.post(
         "/api/mibs", content=MIB_BYTES,
@@ -565,6 +584,138 @@ def test_mib_browser_page_and_tree_api(web):
     names = {n["name"] for n in d["nodes"]}
     assert any(n["parent_name"] not in names for n in d["nodes"]), "tree must have a root"
     assert client.get("/api/mibs/deadbeefdeadbeef/tree", headers=_headers(alice)).status_code == 404
+
+
+def test_standard_mib_import_and_warnings(web):
+    """A standard SMIv2 MIB with IMPORTS/MODULE-IDENTITY resolves without dropped nodes."""
+    client, _, _, alice, _ = web
+    rec = client.post(
+        "/api/mibs", content=STANDARD_MIB,
+        headers={**_headers(alice), "X-MIB-Filename": "TEST-IF-MIB.mib"},
+    ).json()["mib"]
+    tree = client.get(f"/api/mibs/{rec['mib_id']}/tree", headers=_headers(alice)).json()
+    by_name = {n["name"]: n for n in tree["nodes"]}
+    assert {"testIfMIB", "testIfObjects", "testIfTable", "testIfEntry",
+            "testIfIndex", "testIfDescr", "testIfPhys", "testIfOperStatus"} <= set(by_name)
+    assert by_name["testIfMIB"]["kind"] == "group"
+    assert by_name["testIfMIB"]["oid"] == "1.3.6.1.2.1.999"  # imported mib-2 parent
+    assert by_name["testIfTable"]["kind"] == "table"
+    assert by_name["testIfEntry"]["kind"] == "entry"
+    assert by_name["testIfIndex"]["kind"] == "column"
+    assert by_name["testIfIndex"]["table_name"] == "testIfTable"
+    assert by_name["testIfIndex"]["oid"] == "1.3.6.1.2.1.999.1.1.1.1"
+    # imported textual convention normalised to a base type; enum preserved
+    assert by_name["testIfPhys"]["syntax"]["base_type"] == "Integer32"
+    assert by_name["testIfOperStatus"]["syntax"]["enum"] == {
+        "up": 1, "down": 2, "testing": 3,
+    }
+
+    w = client.get(f"/api/mibs/{rec['mib_id']}/warnings", headers=_headers(alice)).json()
+    assert {"SNMPv2-SMI", "SNMPv2-TC", "SNMPv2-CONF"} <= set(w["parser"]["imports"])
+    assert w["parser"]["strict_ok"] is True
+    assert not any(x["code"] in ("UNRESOLVED_PARENT", "UNKNOWN_SYNTAX")
+                   for x in w["warnings"]), w["warnings"]
+    assert client.get(
+        "/api/mibs/deadbeefdeadbeef/warnings", headers=_headers(alice)
+    ).status_code == 404
+
+
+def _policy_app(root: Path, yaml_text: str):
+    global _APP_COUNTER
+    _APP_COUNTER += 1
+    os.environ["SNMP_TEST_PROBE_MOCK_PORT"] = str(13800 + _APP_COUNTER)
+    os.environ["SNMP_TEST_PROBE_TRAP_PORT"] = str(13900 + _APP_COUNTER)
+    os.environ.pop("SNMP_TEST_DEV_BYPASS", None)
+    (root / "config").mkdir(parents=True, exist_ok=True)
+    (root / "config" / "web.yaml").write_text(yaml_text, encoding="utf-8")
+    shutil.copy(ROOT / "config" / "safety-policy.yaml", root / "config" / "safety-policy.yaml")
+    return create_app(root=root, config_path=root / "config" / "web.yaml")
+
+
+def test_web_policy_guards_reject_live_and_record_audit(tmp_path):
+    """Tightened security.web is actually enforced (defaults stay unrestricted)."""
+    root = tmp_path / "policy"
+    app = _policy_app(root, (
+        "security:\n  web:\n    allow_live: true\n"
+        "    allowed_targets: [\"192.0.2.10\"]\n"
+        "    live_set_enabled: false\n    hard_block_enabled: true\n"
+    ))
+    with TestClient(app) as client:
+        token = _register(client, "policy@example.com")
+        h = _headers(token)
+        caps = client.get("/api/snmp/capabilities", headers=h).json()
+        assert caps["live_set"] is False and caps["allowed_targets"] == ["192.0.2.10"]
+        cfg = client.get("/api/config", headers=h).json()
+        assert cfg["allowed_targets"] == ["192.0.2.10"]
+        assert cfg["probe_live_set_enabled"] is False
+
+        r = client.post("/api/snmp/probe", headers=h, json={
+            "mode": "live", "operation": "GET", "oid": "1.3.6.1.2.1.1.1.0",
+            "target_host": "203.0.113.5",
+        })
+        assert r.status_code == 400 and "allowed_targets" in r.json()["detail"]
+
+        r = client.post("/api/snmp/probe", headers=h, json={
+            "mode": "live", "operation": "SET", "oid": "1.3.6.1.4.1.52305.2.7.1.0",
+            "value": "1", "asn1": "Integer32", "target_host": "192.0.2.10",
+        })
+        assert r.status_code == 400 and "live SET" in r.json()["detail"]
+
+        mib_id = client.post(
+            "/api/mibs", content=MIB_BYTES,
+            headers={**h, "X-MIB-Filename": "policy.mib"},
+        ).json()["mib"]["mib_id"]
+        r = client.post("/api/jobs", headers=h, json={
+            "mib_id": mib_id, "mode": "live", "target_host": "10.0.0.99",
+            "version": "v1", "limit": 1, "credential": {"community": "public"},
+        })
+        assert r.status_code == 400, r.text
+
+        mock = client.post("/api/snmp/probe", headers=h, json={
+            "mode": "mock", "operation": "GET", "oid": "1.3.6.1.2.1.1.1.0",
+        })
+        assert mock.status_code == 200 and mock.json()["ok"]
+
+        entries = client.get("/api/snmp/audit", headers=h).json()["entries"]
+        assert sum(1 for e in entries if e.get("policy_denied")) >= 2
+        timeline = client.get("/api/audit?limit=500", headers=h).json()["entries"]
+        assert any(e.get("event") == "job_rejected" for e in timeline)
+
+
+def test_probe_set_hard_block_is_enforced(tmp_path):
+    """A live SET on a hard_block node is rejected before any SNMP traffic."""
+    from snmp_test.model.types import MibModel
+    from snmp_test.runner.safety import blocked_nodes, load_policy
+
+    root = tmp_path / "hard-block"
+    app = _policy_app(root, "security:\n  web:\n    hard_block_enabled: true\n")
+    with TestClient(app) as client:
+        token = _register(client, "block@example.com")
+        h = _headers(token)
+        mib_id = client.post(
+            "/api/mibs", content=MIB_BYTES,
+            headers={**h, "X-MIB-Filename": "block.mib"},
+        ).json()["mib"]["mib_id"]
+        model = MibModel.from_dict(json.loads(
+            (root / "work" / "mibs" / mib_id / "model.json").read_text(encoding="utf-8")
+        ))
+        policy = load_policy(root / "config" / "safety-policy.yaml")
+        names = set(blocked_nodes(model, policy))
+        node = next((n for n in model.nodes if n.name in names and n.kind == "scalar"), None)
+        assert node is not None, "fixture MIB must contain a hard_block scalar"
+        oid = node.oid + ".0"
+
+        r = client.post("/api/snmp/probe", headers=h, json={
+            "mode": "live", "operation": "SET", "oid": oid, "value": "1",
+            "asn1": "Integer32", "target_host": "192.0.2.10",
+        })
+        assert r.status_code == 400 and "安全策略阻断" in r.json()["detail"]
+        # The same OID is still writable against the local mock agent.
+        mock = client.post("/api/snmp/probe", headers=h, json={
+            "mode": "mock", "operation": "SET", "oid": oid, "value": "1",
+            "asn1": "Integer32", "credential": {"community": "private"},
+        })
+        assert mock.status_code == 200, mock.text
 
 
 def test_unified_audit_timeline(web):

@@ -13,3 +13,7 @@ fastapi==0.141.1
 starlette==1.3.1
 uvicorn==0.52.1
 httpx==0.28.1
+# 通用 MIB 导入：pysmi 的 SMIv2 解析器用于读取 IMPORTS 和做严格语法检查。
+# 真正的节点树由内置离线依赖集（src/snmp_test/model/mib_deps/）+ 容错解析器生成，
+# 不依赖 ASN.1 文本或联网；pysmi 缺失时自动降级，不影响模型结果。
+pysmi==2.0.0

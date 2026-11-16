@@ -38,7 +38,7 @@
 | `NOTIFICATION-TYPE` / `TRAP-TYPE` | **0** |
 | trap 配置 | `snmptrapPoliciesTable`（`alarmSetting 1`，16 列）、`emailalarmPoliciesTable`（`alarmSetting 2`）、`eventLogsTable`（`serverAssetInfo 11`，7 列） |
 
-### 2.2 为什么不采用 pysmi
+### 2.2 为什么节点树仍由自研解析器生成
 
 该 MIB 不是严格 SMIv2：
 
@@ -52,7 +52,9 @@
 8. OID 编号**不连续且存在重复**（编号 2、10 等被注释；注释块与有效节点重复占用同一子编号）；
 9. 拼写异常：`diabled(0)`、`waring(2)`、`EnginedId`、`present-nondetected(0)`、`raidStorge*` 等；有节点名为 `raidLogicalInfoBadBlocksTable` 但实为**列**。
 
-严格编译器会失败或漏节点；按行正则则会把注释定义计入（约多 10%）。故采用**自研容错解析器**。
+严格编译器会失败或漏节点；按行正则则会把注释定义计入（约多 10%）。故节点树始终由**自研容错解析器**生成。
+
+pysmi 仅作为可选辅助：`model/mib_compiler.py` 用它提取 `IMPORTS` 依赖并做严格 SMIv2 语法检查，不参与建树；缺失 pysmi 时自动降级，模型结果不变。对于标准 MIB 引用的外部父节点（`mib-2` / `ifMIB` / `snmpModules` …）与文本约定（`TruthValue` / `RowStatus` …），由内置离线符号表 `model/mib_deps/standard-symbols.json` 补齐，因此标准 SMIv2 MIB 也能导入，无需联网或外部 ASN.1 文本。
 
 ---
 
@@ -302,7 +304,7 @@ case_id = "TC-" + sha256(
 
 | 需求 | 改动位置 |
 | --- | --- |
-| 新增 MIB / 换成标准 SMI | 仅 `model/mib_parser.py`；模型结构不变 |
+| 新增 MIB / 换成标准 SMI | `model/mib_parser.py` + `model/mib_deps/standard-symbols.json`；`model/mib_compiler.py` 只做 IMPORTS/严格语法检查；模型结构不变 |
 | 更换 SNMP 后端（net-snmp CLI） | 仅 `snmp/transport.py` 实现同一 `SnmpSession` 接口 |
 | 新增断言 | `runner/assertions.py` 增加 `kind`，用例 JSON 中声明 |
 | 新增 trap 期望 | `config/trap-expectations.yaml`，无需改代码 |

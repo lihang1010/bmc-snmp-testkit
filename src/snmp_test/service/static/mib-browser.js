@@ -39,13 +39,18 @@
   var colSyntax = {};           // column oid -> syntax (for enum value labels)
   var allOidMap = {};           // node oid -> node (for numeric OID -> name)
   var showAll = {};             // node.oid -> true (expand a huge child list fully)
+  var instanceRows = {};        // table_name -> [row_index], discovered at WALK time
+  var tableIndexNames = {};     // table_name -> INDEX { ... } symbol names
   var selected = null;
   var lastResult = null, lastRequest = null, viewMode = 'smart', busy = false;
   var refreshTimer = null, ctxNode = null;
+  var caps = null, pendingSetOid = null;
   var MAX_PAGES = 10;
 
-  var ICONS = {group:'▦', table:'▤', entry:'▧', column:'▪', scalar:'•'};
+  var ICONS = {group:'▦', table:'▤', entry:'▧', column:'▪', scalar:'•',
+               instances:'▥', row:'›'};
   function kindIcon(kind){ return ICONS[kind] || '·'; }
+  function keyOf(node){ return node.__key || node.oid; }
 
   // ------------------------------------------------------------- MIB list + tree
   function loadMibs(){
@@ -68,6 +73,7 @@
     $('tree').innerHTML = '<div class="tree-empty">加载中…</div>';
     return api('/api/mibs/'+mibId+'/tree').then(function(d){
       treeData = d;
+      instanceRows = {};
       buildTreeIndex(d.nodes || []);
       selected = null;
       $('nodeDetail').innerHTML = '';
@@ -75,6 +81,22 @@
       $('treeInfo').innerHTML = '共 <b>'+d.total+'</b> 个节点 · '+esc(d.module_name || '')+
         ' · 单击标量/表/列自动探测';
       $('statusPill').textContent = (d.module_name || 'MIB') + ' · ' + d.total + ' 节点';
+      return api('/api/mibs/'+mibId+'/warnings').then(function(w){
+        var bits = [];
+        if(w.total){
+          var first = (w.warnings || []).slice(0, 3).map(function(x){
+            return (x.code || '') + ' ' + (x.message || '');
+          }).join('；');
+          bits.push('解析告警 ' + w.total + ' 条（前 3 条：' + first + '）');
+        }
+        var p = w.parser || {};
+        var deps = Object.keys(p.imports || {});
+        if(deps.length) bits.push('IMPORTS 依赖模块：' + deps.join(', '));
+        if(p.strict_ok === false) bits.push('未通过 SMIv2 严格语法检查，已用容错解析器解析');
+        var box = $('parseWarn');
+        box.innerHTML = bits.map(esc).join('<br>');
+        box.classList.toggle('hidden', !bits.length);
+      }).catch(function(){});
     }).catch(function(e){
       $('tree').innerHTML = '<div class="tree-empty">加载失败: '+esc(e.message)+'</div>';
       toast('加载节点树失败: '+e.message, true);
@@ -84,6 +106,10 @@
   function buildTreeIndex(nodes){
     byName = {}; childrenMap = {}; prefixMap = {}; tableCols = {};
     colSyntax = {}; allOidMap = {}; showAll = {}; expanded = {};
+    tableIndexNames = {};
+    (treeData.tables || []).forEach(function(t){
+      tableIndexNames[t.name] = t.index_names || [];
+    });
     nodes.forEach(function(n){ byName[n.name] = n; });
     nodes.forEach(function(n){
       (childrenMap[n.parent_name] = childrenMap[n.parent_name] || []).push(n);
@@ -104,16 +130,17 @@
 
   function makeNodeRow(node, depth, hasKids){
     var row = document.createElement('div');
+    var key = keyOf(node);
     row.className = 'tree-node' + (selected && selected.name === node.name ? ' selected' : '');
     row.style.paddingLeft = (8 + depth*14) + 'px';
 
     var toggle = document.createElement('span');
     toggle.className = 'tree-toggle' + (hasKids ? '' : ' leaf');
-    toggle.textContent = expanded[node.oid] ? '▼' : '▶';
+    toggle.textContent = expanded[key] ? '▼' : '▶';
     if(hasKids){
       toggle.addEventListener('click', function(e){
         e.stopPropagation();
-        expanded[node.oid] = !expanded[node.oid];
+        expanded[key] = !expanded[key];
         renderTree();
       });
     }
@@ -142,20 +169,47 @@
     row.appendChild(oid);
 
     row.__node = node;
-    row.addEventListener('click', function(){ selectNode(node); });
+    row.addEventListener('click', function(){
+      if(node.__synthetic === 'row') showInstanceDetail(node.__table, node.__index);
+      else if(node.__synthetic !== 'instances') selectNode(node);
+    });
     return row;
+  }
+
+  // Static model children plus instances discovered by the last WALK.  The MIB
+  // model has no instance layer, so these nodes are synthetic and are keyed
+  // separately to avoid colliding with the parent's real OID.
+  function childrenOf(node){
+    if(node.__synthetic === 'instances'){
+      return (node.__rows || []).map(function(ix){
+        return {__synthetic:'row', __key:node.oid + '#row#' + ix,
+                name:'行 ' + ix, oid:node.oid + '.' + ix, kind:'row',
+                __table:node.__table, __index:ix};
+      });
+    }
+    var kids = (childrenMap[node.name] || []).slice();
+    if(node.kind === 'table'){
+      var idxs = instanceRows[node.name] || [];
+      if(idxs.length){
+        kids.push({__synthetic:'instances', __key:node.oid + '#instances',
+                   name:'实例 (' + idxs.length + ')', oid:node.oid, kind:'instances',
+                   __rows:idxs, __table:node.name});
+      }
+    }
+    return kids;
   }
 
   function makeTreeNode(node, depth){
     var wrap = document.createElement('div');
-    var kids = childrenMap[node.name] || [];
+    var key = keyOf(node);
+    var kids = childrenOf(node);
     wrap.appendChild(makeNodeRow(node, depth, kids.length > 0));
     var holder = document.createElement('div');
-    holder.style.display = expanded[node.oid] ? 'block' : 'none';
-    if(expanded[node.oid] && kids.length){
+    holder.style.display = expanded[key] ? 'block' : 'none';
+    if(expanded[key] && kids.length){
       // Lazy + chunked: only expanded levels are built, and a single level with
       // hundreds of nodes is capped until the user asks for the rest.
-      var limit = showAll[node.oid] ? kids.length : 60;
+      var limit = showAll[key] ? kids.length : 60;
       kids.slice(0, limit).forEach(function(c){
         holder.appendChild(makeTreeNode(c, depth+1));
       });
@@ -165,7 +219,7 @@
         more.style.paddingLeft = (8 + (depth+1)*14) + 'px';
         more.textContent = '… 还有 ' + (kids.length - limit) + ' 个节点，点击全部展开';
         more.addEventListener('click', function(){
-          showAll[node.oid] = true; renderTree();
+          showAll[key] = true; renderTree();
         });
         holder.appendChild(more);
       }
@@ -240,20 +294,25 @@
   }
 
   // ------------------------------------------------------------- probe
-  function payload(operation, oid){
+  function payload(operation, oid, extra){
     var version = $('version').value;
     var cred = version === 'v3'
       ? {v3_user:$('v3user').value, security_level:$('securityLevel').value,
          auth_protocol:$('authProtocol').value, priv_protocol:$('privProtocol').value,
          auth_key:$('authKey').value, priv_key:$('privKey').value}
       : {community:$('community').value};
-    return {
-      mode: $('localMock').checked ? 'mock' : 'live',
+    var body = {
+      mode: 'live',
       target_host: $('host').value.trim(),
       target_port: parseInt($('port').value || '161', 10),
       version: version, credential: cred, operation: operation, oid: oid,
       max_results: parseInt($('maxResults').value || '200', 10)
     };
+    if(operation === 'SET'){
+      body.value = (extra && extra.value) || '';
+      body.asn1 = (extra && extra.asn1) || 'OctetString';
+    }
+    return body;
   }
 
   // WALK continuation: oid stays the subtree root, cursor is the resume point.
@@ -276,17 +335,21 @@
   }
 
   function setButtons(disabled){
-    ['getBtn','nextBtn','walkBtn','tableBtn','refreshBtn'].forEach(function(id){
+    ['getBtn','nextBtn','walkBtn','tableBtn','setBtn','refreshBtn','exportBtn'].forEach(function(id){
       $(id).disabled = disabled;
     });
+    if(!disabled) syncSetButton();
   }
 
-  function runProbe(operation, oid){
+  function runProbe(operation, oid, extra){
     if(!oid){ toast('请填写 OID', true); return; }
     if(busy){ toast('正在探测中，请稍候', true); return; }
-    var body = payload(operation, oid);
-    if(body.mode === 'live' && !body.target_host){
-      toast('请填写目标 IP，或勾选「本地自测」', true); return;
+    var body = payload(operation, oid, extra);
+    if(operation === 'SET' && !String(body.value || '')){
+      toast('请填写 SET 值', true); return;
+    }
+    if(!body.target_host){
+      toast('请填写目标 IP', true); return;
     }
     if(body.version === 'v3'){
       if(!body.credential.v3_user){ toast('v3 模式请填写用户名', true); return; }
@@ -300,6 +363,7 @@
       lastResult = d;
       renderResult(d);
       if(!d.ok) toast('探测返回错误: '+(d.error || ''), true);
+      else if(operation === 'SET') toast('SET 已执行，建议 GET/刷新读回确认');
     }).catch(function(e){
       toast('探测失败: '+e.message, true);
       $('resultMeta').innerHTML = '<span class="badge badge--fail">失败</span><span>'+esc(e.message)+'</span>';
@@ -398,8 +462,14 @@
 
   function renderResult(d){
     lastResult = d;
+    instanceRows = {};
+    var grouped = groupTables(d.varbinds || []);
+    Object.keys(grouped.tables).forEach(function(name){
+      instanceRows[name] = Object.keys(grouped.tables[name].rows);
+    });
     renderMeta(d);
     renderBody();
+    renderTree();
   }
 
   function colOidOf(oid){
@@ -475,21 +545,43 @@
     toast('已导出 mib-browser.csv');
   }
 
-  // Rows only exist at WALK time (the model has no instance layer), so clicking
-  // a table row shows that instance's full OID/value list as the practical
-  // stand-in for an expandable instance tree.
-  $('resultScroll').addEventListener('click', function(e){
-    var tr = e.target.closest('tr[data-table][data-index]');
-    if(!tr || !lastResult) return;
-    var name = tr.dataset.table, ix = tr.dataset.index;
-    var t = groupTables(lastResult.varbinds || []).tables[name];
-    if(!t || !t.rows[ix]) return;
+  // Rows only exist at WALK time (the model has no instance layer); both the
+  // synthetic instance tree nodes and the table rows show the same detail view.
+  function indexLabel(name, ix){
+    var names = tableIndexNames[name] || [];
+    if(!names.length) return '';
+    var parts = String(ix).split('.');
+    // Only pure-integer indexes can be decoded safely.  String/IP/OID indexes
+    // use length-prefixed or ASN.1 encodings the model does not describe.
+    if(parts.length !== names.length || !parts.every(function(p){ return /^\d+$/.test(p); })){
+      return '复合索引（未解码）: ' + ix;
+    }
+    return names.map(function(n, i){ return n + '=' + parts[i]; }).join(', ');
+  }
+
+  function rowDetailHtml(name, ix){
+    var t = lastResult ? groupTables(lastResult.varbinds || []).tables[name] : null;
+    if(!t || !t.rows[ix]) return '';
     var parts = ['<b>'+esc(name)+'</b> · 索引 <code>'+esc(ix)+'</code>'];
+    var label = indexLabel(name, ix);
+    if(label) parts.push('索引解释 ' + esc(label));
     (tableCols[name] || []).forEach(function(c){
       var vb = t.rows[ix][c.name];
       if(vb) parts.push(esc(c.name)+' = <b>'+esc(formatValue(vb, c.oid))+'</b> <code>'+esc(vb.oid)+'</code>');
     });
-    $('nodeDetail').innerHTML = parts.join('<br>');
+    return parts.join('<br>');
+  }
+
+  function showInstanceDetail(name, ix){
+    $('nodeDetail').innerHTML = rowDetailHtml(name, ix);
+    document.querySelectorAll('#resultScroll tr[data-table][data-index]').forEach(function(tr){
+      tr.classList.toggle('row-hi', tr.dataset.table === name && tr.dataset.index === ix);
+    });
+  }
+
+  $('resultScroll').addEventListener('click', function(e){
+    var tr = e.target.closest('tr[data-table][data-index]');
+    if(tr) showInstanceDetail(tr.dataset.table, tr.dataset.index);
   });
 
   function setView(mode){
@@ -510,13 +602,14 @@
     clearTimeout(queryTimer);
     queryTimer = setTimeout(renderTree, 250);
   });
-  $('version').addEventListener('change', function(){
-    $('v3box').classList.toggle('hidden', this.value !== 'v3');
-  });
-  $('localMock').addEventListener('change', function(){
-    // Local mock agent uses a fixed private community; live uses the default rwcommstr.
-    $('community').value = this.checked ? 'private' : 'rwcommstr';
-  });
+  function syncVersion(){
+    var isV3 = $('version').value === 'v3';
+    $('v3box').classList.toggle('hidden', !isV3);
+    $('communityBox').classList.toggle('hidden', isV3);
+    $('connGrid').classList.toggle('v3-mode', isV3);
+  }
+  $('version').addEventListener('change', syncVersion);
+  syncVersion();
   $('getBtn').addEventListener('click', function(){ runProbe('GET', $('oid').value.trim()); });
   $('nextBtn').addEventListener('click', function(){ runProbe('GETNEXT', $('oid').value.trim()); });
   $('walkBtn').addEventListener('click', function(){ runProbe('WALK', $('oid').value.trim()); });
@@ -525,20 +618,73 @@
     runProbe('WALK', $('oid').value.trim());
   });
   $('refreshBtn').addEventListener('click', function(){
-    if(lastRequest) runProbe(lastRequest.operation, lastRequest.oid);
-    else toast('还没有可刷新的探测', true);
+    if(!lastRequest){ toast('还没有可刷新的探测', true); return; }
+    // Never replay a SET on refresh: read the value back instead.
+    var op = lastRequest.operation === 'SET' ? 'GET' : lastRequest.operation;
+    runProbe(op, lastRequest.oid);
   });
   $('oid').addEventListener('keydown', function(e){
     if(e.key === 'Enter') runProbe('WALK', this.value.trim());
   });
   $('exportBtn').addEventListener('click', exportCsv);
 
+  // ---- SET (explicit confirmation; the server also enforces hard blocks) ----
+  function syncSetButton(){
+    var blocked = caps && (caps.live_set === false || caps.set_enabled === false);
+    $('setBtn').disabled = !!blocked;
+    $('setBtn').title = blocked
+      ? '服务策略已禁用 live SET（security.web.live_set_enabled=false）' : '';
+  }
+  function loadCaps(){
+    return api('/api/snmp/capabilities').then(function(d){
+      caps = d; syncSetButton();
+    }).catch(function(){ /* keep buttons usable if capabilities are unavailable */ });
+  }
+  function closeSetDialog(){ $('setDialog').classList.add('hidden'); }
+  function openSetDialog(oid){
+    if(!oid){ toast('请先选择节点或填写 OID', true); return; }
+    if($('setBtn').disabled){ toast('服务策略已禁用 live SET', true); return; }
+    pendingSetOid = oid;
+    $('oid').value = oid;
+    $('setPanel').classList.remove('hidden');
+    var target = ($('host').value.trim() || '(未填目标)') + ':' + ($('port').value || '161');
+    $('setText').textContent = '将向 ' + target + ' 写入 ' + oid + ' = ' +
+      ($('setValue').value || '(空)') + '（' + $('setAsn1').value + '）。' +
+      '这会修改真实设备配置，请再次确认。';
+    $('setDialog').classList.remove('hidden');
+    $('setValue').focus();
+  }
+  $('setBtn').addEventListener('click', function(){ openSetDialog($('oid').value.trim()); });
+  $('setCancel').addEventListener('click', closeSetDialog);
+  $('setBackdrop').addEventListener('click', closeSetDialog);
+  function refreshSetText(){
+    if($('setDialog').classList.contains('hidden') || !pendingSetOid) return;
+    var target = ($('host').value.trim() || '(未填目标)') + ':' + ($('port').value || '161');
+    $('setText').textContent = '将向 ' + target + ' 写入 ' + pendingSetOid + ' = ' +
+      ($('setValue').value || '(空)') + '（' + $('setAsn1').value + '）。' +
+      '这会修改真实设备配置，请再次确认。';
+  }
+  $('setValue').addEventListener('input', refreshSetText);
+  $('setAsn1').addEventListener('change', refreshSetText);
+  $('setOk').addEventListener('click', function(){
+    var v = $('setValue').value, t = $('setAsn1').value;
+    if(!v){ toast('请填写 SET 值', true); return; }
+    closeSetDialog();
+    if(pendingSetOid) runProbe('SET', pendingSetOid, {value:v, asn1:t});
+  });
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape') closeSetDialog();
+  });
+
   $('autoRefresh').addEventListener('change', function(){
     clearInterval(refreshTimer); refreshTimer = null;
     if(this.checked){
       var secs = Math.max(2, Math.min(600, parseInt($('refreshSeconds').value || '10', 10)));
       refreshTimer = setInterval(function(){
-        if(!busy && lastRequest) runProbe(lastRequest.operation, lastRequest.oid);
+        if(!busy && lastRequest){
+          var op = lastRequest.operation === 'SET' ? 'GET' : lastRequest.operation;
+          runProbe(op, lastRequest.oid);
+        }
       }, secs * 1000);
       toast('已开启自动刷新（每 ' + secs + ' 秒）');
     }
@@ -575,6 +721,10 @@
       $('oid').value = g; runProbe('GET', g);
     }
     else if(act === 'next'){ $('oid').value = oid; runProbe('GETNEXT', oid); }
+    else if(act === 'set'){
+      if(ctxNode.__synthetic){ toast('请对具体的标量/列节点执行 SET', true); return; }
+      openSetDialog((ctxNode.kind === 'scalar') ? oid + '.0' : oid);
+    }
     else if(act === 'table'){ $('oid').value = oid; setView('smart'); runProbe('WALK', oid); }
     else if(act === 'copyOid'){ copyText(oid); }
     else if(act === 'copyName'){ copyText(ctxNode.name); }
@@ -594,5 +744,6 @@
     if(dragging){ dragging = false; $('splitter').classList.remove('dragging'); }
   });
 
+  loadCaps();
   loadMibs();
 })();

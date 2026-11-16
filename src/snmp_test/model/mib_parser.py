@@ -19,9 +19,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .mib_deps import resolve_tc
+
 NAME = r"[A-Za-z][A-Za-z0-9_-]*"
 
-DECL_RE = re.compile(rf"^({NAME})\s+(OBJECT-TYPE|OBJECT\s+IDENTIFIER)\b(.*)$", re.I)
+DECL_RE = re.compile(
+    rf"^({NAME})\s+(OBJECT-TYPE|OBJECT\s+IDENTIFIER|MODULE-IDENTITY)\b(.*)$", re.I
+)
 TYPEDEF_RE = re.compile(rf"^({NAME})\s*::=\s*(.*)$")
 OID_ASSIGN_RE = re.compile(rf"::=\s*\{{\s*({NAME}|\d+)\s+(\d+)\s*\}}")
 SYNTAX_RE = re.compile(
@@ -136,7 +140,10 @@ def _parse_syntax(raw: str) -> dict[str, Any]:
         base = "Integer32"
     else:
         first = raw.split()[0] if raw.split() else "OCTET STRING"
-        base = first.strip(",;")
+        candidate = first.strip(",;")
+        # Imported textual conventions (TruthValue, RowStatus, SnmpAdminString,
+        # ...) are defined in other modules; map them to their base ASN.1 type.
+        base = resolve_tc(candidate) or candidate
 
     enum = {m.group(1): int(m.group(2)) for m in ENUM_ITEM_RE.finditer(raw)}
     ranges = tuple((int(m.group(1)), int(m.group(2))) for m in RANGE_RE.finditer(raw))

@@ -1,0 +1,69 @@
+TEST-IF-MIB DEFINITIONS ::= BEGIN
+IMPORTS
+    MODULE-IDENTITY, OBJECT-TYPE, Integer32, Counter32,
+    mib-2 FROM SNMPv2-SMI
+    DisplayString, PhysAddress FROM SNMPv2-TC
+    MODULE-COMPLIANCE, OBJECT-GROUP FROM SNMPv2-CONF;
+
+testIfMIB MODULE-IDENTITY
+    LAST-UPDATED "202601010000Z"
+    ORGANIZATION "Test"
+    CONTACT-INFO "test@example.com"
+    DESCRIPTION "Standard-MIB-style fixture with IMPORTS and MODULE-IDENTITY."
+    REVISION "202601010000Z"
+    DESCRIPTION "Initial revision."
+    ::= { mib-2 999 }
+
+testIfObjects OBJECT IDENTIFIER ::= { testIfMIB 1 }
+
+testIfTable OBJECT-TYPE
+    SYNTAX SEQUENCE OF TestIfEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION "A table whose parent is defined in this module."
+    ::= { testIfObjects 1 }
+
+testIfEntry OBJECT-TYPE
+    SYNTAX TestIfEntry
+    MAX-ACCESS not-accessible
+    STATUS current
+    DESCRIPTION "Row definition."
+    INDEX { testIfIndex }
+    ::= { testIfTable 1 }
+
+TestIfEntry ::= SEQUENCE {
+    testIfIndex      Integer32,
+    testIfDescr      DisplayString,
+    testIfPhys       PhysAddress,
+    testIfOperStatus INTEGER { up(1), down(2), testing(3) }
+}
+
+testIfIndex OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION "Row index."
+    ::= { testIfEntry 1 }
+
+testIfDescr OBJECT-TYPE
+    SYNTAX DisplayString
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION "Interface description."
+    ::= { testIfEntry 2 }
+
+testIfPhys OBJECT-TYPE
+    SYNTAX TruthValue
+    MAX-ACCESS read-write
+    STATUS current
+    DESCRIPTION "Imported textual convention."
+    ::= { testIfEntry 3 }
+
+testIfOperStatus OBJECT-TYPE
+    SYNTAX INTEGER { up(1), down(2), testing(3) }
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION "Operational state."
+    ::= { testIfEntry 4 }
+
+END

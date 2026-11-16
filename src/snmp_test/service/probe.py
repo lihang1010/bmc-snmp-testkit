@@ -24,9 +24,11 @@ from typing import Any
 
 from snmp_test.config import load_config
 from snmp_test.model.types import MibModel
+from snmp_test.runner.safety import classify_node, load_policy
 from snmp_test.snmp.mock_agent import MockAgent
 from snmp_test.snmp.transport import SnmpSession
 from snmp_test.service.mibs import MibLibrary
+from snmp_test.service.web_policy import WebPolicy
 
 PROBE_MOCK_PORT = 11911
 PROBE_TRAP_PORT = 11912
@@ -92,24 +94,60 @@ class ProbeService:
         self.mock_port = int(os.environ.get("SNMP_TEST_PROBE_MOCK_PORT", PROBE_MOCK_PORT))
         self.trap_port = int(os.environ.get("SNMP_TEST_PROBE_TRAP_PORT", PROBE_TRAP_PORT))
         self.audit = ProbeAudit(self.root)
+        self.policy = WebPolicy.from_security(web_security)
         self._agent: MockAgent | None = None
         self._agent_lock = asyncio.Lock()
 
     # ------------------------------------------------------------- policy
     def capabilities(self) -> dict[str, Any]:
+        desc = self.policy.describe()
+        live_set = bool(desc["live_set_enabled"])
         return {
             "operations": list(OPERATIONS),
             "mock_set": True,
-            "live_set": True,
-            "allow_live": True,
-            "allowed_targets": [],
-            "set_enabled": True,
+            "live_set": live_set,
+            "allow_live": bool(desc["allow_live"]),
+            "allowed_targets": list(desc["allowed_targets"]),
+            "set_enabled": live_set,
+            "readonly_only": bool(desc["readonly_only"]),
+            "hard_block_enabled": bool(desc["hard_block_enabled"]),
             "audit_enabled": True,
             "audit_path": "work/probe-audit.jsonl",
             "max_walk": MAX_WALK,
             "mock_port": self.mock_port,
             "asn1_types": list(ASN1_TYPES),
         }
+
+    def _deny(self, req: dict[str, Any], user: str, reason: str) -> None:
+        """Record a policy rejection (otherwise invisible in the audit trail)."""
+        self.audit.record({
+            "user": user,
+            "mode": str(req.get("mode") or "mock"),
+            "target": str(req.get("target_host") or ""),
+            "version": str(req.get("version") or ""),
+            "operation": str(req.get("operation") or ""),
+            "oid": str(req.get("oid") or ""),
+            "ok": False,
+            "error": reason,
+            "count": 0,
+            "elapsed_ms": 0,
+            "policy_denied": True,
+        })
+
+    @staticmethod
+    def _node_for_oid(model: Any, oid: str) -> Any | None:
+        """Longest-prefix lookup of an instance OID back to its scalar/column node."""
+        best = None
+        best_len = -1
+        for node in model.nodes:
+            if node.kind not in ("scalar", "column") or not node.oid:
+                continue
+            target = oid.lstrip(".")
+            base = node.oid.lstrip(".")
+            if (target == base or target.startswith(base + ".")) and len(base) > best_len:
+                best_len = len(base)
+                best = node
+        return best
 
     async def stop(self) -> None:
         async with self._agent_lock:
@@ -218,6 +256,11 @@ class ProbeService:
 
         host = str(req.get("target_host") or "127.0.0.1")
 
+        denied = self.policy.check(mode, operation, host)
+        if denied:
+            self._deny(req, user, denied)
+            raise ProbeError(denied)
+
         asn1 = str(req.get("asn1") or "OctetString")
         value = req.get("value")
         if operation == "SET":
@@ -231,7 +274,17 @@ class ProbeService:
                 except (TypeError, ValueError) as exc:
                     raise ProbeError("Integer32 需要整数值") from exc
 
-        _model, mib_path = self._model_and_mib()
+        model, mib_path = self._model_and_mib()
+        if operation == "SET" and mode == "live" and self.policy.hard_block_enabled:
+            node = self._node_for_oid(model, oid)
+            if node is not None:
+                level, reason = classify_node(
+                    node, load_policy(self.root / "config" / "safety-policy.yaml")
+                )
+                if level != "safe":
+                    msg = f"SET 被安全策略阻断：{node.name}（{reason}）"
+                    self._deny(req, user, msg)
+                    raise ProbeError(msg)
         overrides, cred, version = self._overrides(req, mib_path)
         if mode == "mock":
             await self._ensure_agent(overrides)

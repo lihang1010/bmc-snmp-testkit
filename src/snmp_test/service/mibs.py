@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from snmp_test.generator.case_builder import GeneratorOptions, generate_cases
+from snmp_test.model.mib_compiler import smi_info
 from snmp_test.model.mib_model import build_model
 from snmp_test.runner.case_store import CaseStore
 from snmp_test.runner.safety import load_policy
@@ -117,7 +118,12 @@ class MibLibrary:
             ).write(folder / "cases.json")
             (folder / "parse-warnings.json").write_text(
                 json.dumps(
-                    {"total": len(model.warnings), "warnings": model.warnings, "stats": model.stats},
+                    {
+                        "total": len(model.warnings),
+                        "warnings": model.warnings,
+                        "stats": model.stats,
+                        "parser": smi_info(text),
+                    },
                     indent=2, ensure_ascii=False,
                 ),
                 encoding="utf-8",

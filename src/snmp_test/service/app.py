@@ -1,10 +1,13 @@
-"""Read-only FastAPI service for multi-user BMC SNMP testing.
+"""FastAPI service for multi-user BMC SNMP testing.
 
 Design constraints implemented here:
-  * read-only by default: SET / guarded operations are never reachable via API;
-  * live access is gated by admin role AND server-side target allowlist;
+  * batch jobs stay read-only: only GET/GETNEXT/GETBULK cases are selected;
+  * interactive probes (MIB browser) support GET/GETNEXT/WALK/SET, guarded by
+    ``security.web`` policy, the safety policy's hard blocks and the audit log;
+  * live access is open by default on the intranet and can be tightened through
+    ``security.web.allow_live`` / ``allowed_targets`` / ``readonly_only``;
   * credentials are accepted per request and never written to disk;
-  * jobs are executed by a single serial worker (fixed UDP ports, BMC safety);
+  * jobs run on a small worker pool (default 2, max 4) with per-target serialisation;
   * each uploaded MIB gets its own content-addressed model and case repository.
 """
 
@@ -127,9 +130,9 @@ def create_app(
         await probe.stop()
 
     app = FastAPI(
-        title="bmc-snmp-testkit · 只读测试服务",
+        title="bmc-snmp-testkit · BMC SNMP 测试服务",
         version="1.0",
-        description="多用户 · 多 MIB · 只读 GET · 串行任务 · 可追溯报告",
+        description="多用户 · 多 MIB · 批量只读任务 · 交互式探测 · 可追溯报告",
         lifespan=lifespan,
     )
     app.state.auth = auth
@@ -166,7 +169,7 @@ def create_app(
     # ------------------------------------------------------------- auth
     @app.get("/health")
     async def health():
-        return {"status": "ok", "readonly": True, "workers": 1}
+        return {"status": "ok", "readonly": True, "workers": runner.workers}
 
     @app.post("/api/auth/code")
     async def auth_send_code(payload: CodeRequest):
@@ -220,12 +223,16 @@ def create_app(
     @app.get("/api/config")
     async def get_config(request: Request):
         user = require(request)
+        desc = probe.policy.describe()
         return {
             "user": user.email,
             "readonly_only": True,
             "allowed_operations": ["GET"],
-            "live_enabled": True,
-            "allowed_targets": [],
+            "live_enabled": bool(desc["allow_live"]),
+            "allowed_targets": list(desc["allowed_targets"]),
+            "probe_live_set_enabled": bool(desc["live_set_enabled"]),
+            "probe_readonly_only": bool(desc["readonly_only"]),
+            "probe_hard_block_enabled": bool(desc["hard_block_enabled"]),
             "audit_enabled": True,
             "versions": list(VERSIONS),
             "default_limit": 20,
@@ -268,6 +275,22 @@ def create_app(
             return library.get(mib_id).to_dict()
         except MibError as exc:
             raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/api/mibs/{mib_id}/warnings")
+    async def get_mib_warnings(mib_id: str, request: Request):
+        """Parse warnings + IMPORTS/strict-syntax info, so skipped nodes are visible."""
+        require(request)
+        try:
+            library.get(mib_id)
+            path = library.model_path(mib_id).parent / "parse-warnings.json"
+        except MibError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if not path.is_file():
+            return {"total": 0, "warnings": [], "stats": {}, "parser": {}}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise HTTPException(500, f"parse-warnings.json 读取失败: {exc}") from exc
 
     @app.get("/api/mibs/{mib_id}/nodes")
     async def get_nodes(
@@ -447,6 +470,13 @@ def create_app(
         if not (1 <= payload.target_port <= 65535):
             raise HTTPException(400, "invalid target_port")
         if payload.mode == "live":
+            # Reject before the job enters the queue (same policy as interactive probes).
+            denied = probe.policy.check("live", "GET", payload.target_host)
+            if denied:
+                store.audit_log({"event": "job_rejected", "user": user.name,
+                                 "target": payload.target_host, "mode": payload.mode,
+                                 "reason": "policy_denied", "error": denied})
+                raise HTTPException(400, denied)
             # Live targets require complete credentials; mock mode uses built-ins.
             cred = payload.credential or {}
             if payload.version in ("v1", "v2c"):
@@ -563,14 +593,6 @@ def create_app(
             request, "audit.html", {"title": "操作记录 · bmc-snmp-testkit"}
         )
 
-    @app.get("/debug", response_class=HTMLResponse)
-    async def debug_page(request: Request):
-        if auth.authenticate(_token(request)) is None:
-            return RedirectResponse("/login", status_code=302)
-        return templates.TemplateResponse(
-            request, "debug.html", {"title": "SNMP 调试台 · bmc-snmp-testkit"}
-        )
-
     @app.get("/mib-browser", response_class=HTMLResponse)
     async def mib_browser_page(request: Request):
         if auth.authenticate(_token(request)) is None:
@@ -612,7 +634,11 @@ def main(argv: list[str] | None = None) -> int:
         print("[snmp-test-web] 开发旁路已启用：跳过登录（仅本地调试）", flush=True)
     if not os.environ.get("SNMP_TEST_SMTP_HOST", "").strip():
         print("[snmp-test-web] 未配置 SMTP：验证码写入 work/mail-dev.log 并显示在登录页", flush=True)
-    print(f"[snmp-test-web] 监听 http://{args.host}:{args.port}（只读服务，SET 已禁用）", flush=True)
+    print(
+        f"[snmp-test-web] 监听 http://{args.host}:{args.port}"
+        f"（批量任务只读；交互探测可 GET/GETNEXT/WALK/SET，受 security.web 与安全策略约束）",
+        flush=True,
+    )
     import uvicorn
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

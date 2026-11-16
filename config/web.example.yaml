@@ -14,9 +14,21 @@
 # 内网部署：live 目标默认可达，不设 allow_live / 白名单等前置门槛。
 # 所有交互式 SNMP 操作（含 SET 值）写入 work/probe-audit.jsonl，按账号溯源；
 # 凭据不写入审计日志。批量任务仍只跑只读 GET。
+#
+# 需要收紧时，把下面这段复制到 config/web.yaml（列出的即默认值）：
+# security:
+#   web:
+#     allow_live: true            # false 禁止所有 live 探测
+#     allowed_targets: []         # 非空时仅允许列出的目标 IP
+#     readonly_only: false        # true 禁止所有 SET
+#     live_set_enabled: true      # false 禁止 live SET（mock SET 仍可用）
+#     hard_block_enabled: true    # live SET 应用 safety-policy.yaml 的硬阻断
+# 旧的顶层 security.allow_live / allowed_targets 与 auth.users 属于历史模板，不再读取。
+# 被策略拒绝的操作也写入审计（policy_denied）。
 
 # 说明：
 #  - MIB 库所有账号共享；任务队列按账号隔离，只能看到自己的任务与报告。
 #  - 目标端口、SNMP 版本、团体字 / v3 凭据在任务提交时内存传入，不写入本文件。
-#  - 串行执行（单 worker），模拟 Agent 用 11811、trap 监听 11812。
+#  - 默认 2 个 worker（SNMP_TEST_WEB_WORKERS，上限 4），同一 live 目标串行；
+#    模拟 Agent 用 11811 + slot*10、trap 监听 11812 + slot*10。
 #  - 报告输出到 runs/web-<job_id>/，仅任务所有者可访问。

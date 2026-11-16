@@ -59,11 +59,29 @@
   .ctx-item{padding:7px 11px;font-size:12px;border-radius:6px;cursor:pointer;color:var(--text)}
   .ctx-item:hover{background:#e0f2fe}
   .ctx-sep{height:1px;background:var(--line-soft);margin:4px 2px}
+  .set-panel{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;padding:10px clamp(14px,2.2vw,28px);
+    background:var(--surface);border-bottom:1px solid var(--line)}
+  .set-panel>div{min-width:180px;flex:0 1 240px}
+  .set-hint{font-size:11px;color:var(--muted);max-width:520px;line-height:1.6}
+  .modal{position:fixed;inset:0;z-index:70;display:grid;place-items:center;padding:20px}
+  .modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.42);backdrop-filter:blur(3px)}
+  .modal-card{position:relative;width:min(440px,100%);padding:24px;background:var(--surface);
+    border:1px solid var(--line);border-radius:14px;box-shadow:0 24px 60px rgba(15,23,42,.2)}
+  .modal-icon{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;font-weight:800;
+    font-size:18px;color:#b91c1c;background:#fef2f2;border:1px solid #fee2e2;margin-bottom:14px}
+  .modal-title{font-size:15px;font-weight:700;margin-bottom:6px}
+  .modal-text{font-size:12.5px;color:var(--muted);line-height:1.7;word-break:break-word}
+  .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+  .btn--danger-solid{color:#fff;background:linear-gradient(135deg,#ef4444,#dc2626)}
   .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 14px}
   .grid>.span2{grid-column:span 2}
-  .mock-toggle{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:500;
-    color:var(--muted);cursor:pointer;margin:0}
-  .mock-toggle input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+  .grid>.span-all{grid-column:1 / -1}
+  .conn-bar>.grid.v3-mode{grid-template-columns:repeat(3,minmax(0,1fr))}
+  #v3box{margin-top:2px;padding:12px 14px 14px;border:1px solid var(--line-soft);
+    border-radius:10px;background:var(--surface-2)}
+  #v3box .grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 14px}
+  .v3-title{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--muted);
+    text-transform:uppercase;margin:0 0 10px}
   .conn-bar{flex:0 0 auto;padding:12px clamp(14px,2.2vw,28px);background:var(--surface);
     border-bottom:1px solid var(--line)}
   .toolbar{flex:0 0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
@@ -92,6 +110,8 @@
   .tree-icon{width:15px;flex:0 0 15px;text-align:center;font-size:10px;font-weight:800}
   .tree-icon.group{color:#7c3aed}.tree-icon.table{color:#0284c7}
   .tree-icon.entry{color:#0891b2}.tree-icon.column{color:#059669}.tree-icon.scalar{color:#d97706}
+  .tree-icon.instances{color:#7c3aed}.tree-icon.row{color:var(--accent);font-size:13px}
+  .row-hi{background:#e0f2fe !important}
   .tree-name{font-weight:600;color:var(--text)}
   .tree-oid{margin-left:auto;padding-left:10px;font-family:ui-monospace,Menlo,Consolas,monospace;
     font-size:10.5px;color:var(--faint)}
@@ -136,7 +156,10 @@
     background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);
     box-shadow:0 20px 48px rgba(15,23,42,.22);color:var(--text)}
   #toast.bad{background:#fef2f2;border-color:#fecaca;border-left-color:var(--fail);color:#b91c1c}
-  @media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.oid-row{flex-basis:100%}}
+  @media(max-width:900px){
+    .grid,.conn-bar>.grid.v3-mode,#v3box .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .oid-row{flex-basis:100%}
+  }
 </style>
 </head>
 <body>
@@ -147,27 +170,28 @@
   </div>
   <div class="nav">
     <span class="pill" id="statusPill">加载中…</span>
-    <a class="btn btn--ghost btn--sm" href="/debug">SNMP 调试台</a>
     <a class="btn btn--ghost btn--sm" href="/audit">操作记录</a>
     <a class="btn btn--ghost btn--sm" href="/">返回控制台</a>
   </div>
 </header>
 
 <div class="conn-bar">
-  <div class="grid">
+  <div class="grid" id="connGrid">
     <div><label for="host">目标 IP</label><input id="host" placeholder="真实 BMC IP，例如 10.20.30.40"></div>
     <div><label for="port">端口</label><input id="port" type="number" value="161"></div>
     <div><label for="version">SNMP 版本</label><select id="version"><option>v1</option><option>v2c</option><option>v3</option></select></div>
-    <div><label for="community">团体字</label><input id="community" value="rwcommstr" type="text"></div>
-    <div class="span2 hidden" id="v3box"><div class="grid">
-      <div><label for="v3user">v3 用户</label><input id="v3user"></div>
-      <div><label for="securityLevel">安全级别</label><select id="securityLevel"><option>authPriv</option><option>authNoPriv</option><option>noAuthNoPriv</option></select></div>
-      <div><label for="authProtocol">认证协议</label><select id="authProtocol"><option>SHA</option><option>MD5</option><option>SHA256</option></select></div>
-      <div><label for="privProtocol">加密协议</label><select id="privProtocol"><option>AES128</option><option>DES</option><option>AES256</option></select></div>
-      <div><label for="authKey">认证密钥</label><input id="authKey" type="password"></div>
-      <div><label for="privKey">加密密钥</label><input id="privKey" type="password"></div>
-    </div></div>
-    <div class="span2"><label class="mock-toggle"><input id="localMock" type="checkbox"> 本地自测（改用模拟 Agent，不连真实设备）</label></div>
+    <div id="communityBox"><label for="community">团体字</label><input id="community" value="rwcommstr" type="text"></div>
+    <div class="span-all hidden" id="v3box">
+      <div class="v3-title">SNMP v3 凭据</div>
+      <div class="grid">
+        <div><label for="v3user">v3 用户</label><input id="v3user"></div>
+        <div><label for="securityLevel">安全级别</label><select id="securityLevel"><option>authPriv</option><option>authNoPriv</option><option>noAuthNoPriv</option></select></div>
+        <div><label for="authProtocol">认证协议</label><select id="authProtocol"><option>SHA</option><option>MD5</option><option>SHA256</option></select></div>
+        <div><label for="privProtocol">加密协议</label><select id="privProtocol"><option>AES128</option><option>DES</option><option>AES256</option></select></div>
+        <div><label for="authKey">认证密钥</label><input id="authKey" type="password"></div>
+        <div><label for="privKey">加密密钥</label><input id="privKey" type="password"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -178,11 +202,22 @@
     <button class="btn btn--ghost" type="button" id="nextBtn">GETNEXT</button>
     <button class="btn btn--primary" type="button" id="walkBtn">WALK</button>
     <button class="btn btn--ghost" type="button" id="tableBtn">Table View</button>
+    <button class="btn btn--ghost" type="button" id="setBtn">SET</button>
     <button class="btn btn--ghost" type="button" id="refreshBtn">刷新</button>
     <button class="btn btn--ghost" type="button" id="exportBtn">导出 CSV</button>
   </div>
   <div class="walk-hint">WALK <input id="maxResults" type="number" value="200" min="1" max="200"> 条/页，截断自动续页</div>
   <label class="auto-refresh"><input id="autoRefresh" type="checkbox"> 自动刷新 <input id="refreshSeconds" type="number" value="10" min="2" max="600"> 秒</label>
+</div>
+
+<div class="set-panel hidden" id="setPanel">
+  <div><label for="setValue">SET 值</label><input id="setValue" placeholder="例如 1 或 abc"></div>
+  <div><label for="setAsn1">值类型</label><select id="setAsn1">
+    <option>OctetString</option><option>Integer32</option><option>IpAddress</option>
+    <option>ObjectIdentifier</option><option>TimeTicks</option>
+  </select></div>
+  <div class="set-hint">SET 会修改设备配置，每次写入均记入审计日志；服务端还会按
+    <code>config/safety-policy.yaml</code> 拒绝 hard_block / blacklist 节点。</div>
 </div>
 
 <div class="workspace" id="workspace">
@@ -192,6 +227,7 @@
       <input id="treeQuery" placeholder="搜索节点名 / OID">
     </div>
     <div id="treeInfo" class="pane-info">加载 MIB 中…</div>
+    <div id="parseWarn" class="note warn hidden" style="margin:0;border-radius:0"></div>
     <div class="tree-scroll" id="tree"></div>
   </aside>
   <div class="splitter" id="splitter" title="拖动调整宽度"></div>
@@ -211,10 +247,23 @@
   <div class="ctx-item" data-act="walk">WALK 此节点</div>
   <div class="ctx-item" data-act="get">GET（标量补 .0）</div>
   <div class="ctx-item" data-act="next">GETNEXT</div>
+  <div class="ctx-item" data-act="set">SET 此节点…</div>
   <div class="ctx-item" data-act="table">Table View（整表）</div>
   <div class="ctx-sep"></div>
   <div class="ctx-item" data-act="copyOid">复制 OID</div>
   <div class="ctx-item" data-act="copyName">复制节点名</div>
+</div>
+<div id="setDialog" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-backdrop" id="setBackdrop"></div>
+  <div class="modal-card">
+    <div class="modal-icon">!</div>
+    <div class="modal-title">确认 SET</div>
+    <div class="modal-text" id="setText"></div>
+    <div class="modal-actions">
+      <button class="btn btn--ghost" type="button" id="setCancel">取消</button>
+      <button class="btn btn--danger-solid" type="button" id="setOk">执行 SET</button>
+    </div>
+  </div>
 </div>
 <div id="toast"></div>
 <script src="/static/mib-browser.js"></script>

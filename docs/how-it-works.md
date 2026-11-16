@@ -321,11 +321,15 @@ python -c "import json;a=json.load(open('runs/verify-a/results.json',encoding='u
 
 | 新增 | 作用 |
 | --- | --- |
-| `src/snmp_test/security.py` | **把 live 闸口从 CLI 下沉到 `Runtime`**：`SecurityPolicy.enforce()` 校验 `allow_live` 与 `allowed_targets`；`readonly_only` 强制 `enable_set=False` 并拒绝非只读操作；`AuthStore` 提供轻量 per-user token/RBAC |
+| `src/snmp_test/security.py` | **把 live 闸口从 CLI 下沉到 `Runtime`**：`SecurityPolicy.enforce()` 校验 `allow_live` 与 `allowed_targets`；`readonly_only` 强制 `enable_set=False` 并拒绝非只读操作（只约束 CLI / Python 调用） |
+| `src/snmp_test/service/auth.py` | 邮箱账号：注册 / 密码登录 / 验证码登录，SQLite（`work/auth.db`）存用户、验证码与会话，PBKDF2-HMAC-SHA256 加盐，服务端随机 token + HttpOnly Cookie |
+| `src/snmp_test/service/web_policy.py` | 交互探测与任务提交共用的 `security.web` 策略：`allow_live` / `allowed_targets` / `readonly_only` / `live_set_enabled` / `hard_block_enabled`；拒绝写审计 |
 | `src/snmp_test/service/mibs.py` | 按内容 SHA-256 分目录 `work/mibs/<id>/`，每个 MIB 存原文件 + `model.json` + `cases.json` + `parse-warnings.json` + `meta.json` |
-| `src/snmp_test/service/jobs.py` | 单 worker 串行队列、`JobStore`（`work/jobs/jobs.jsonl` + `audit.jsonl`）、内存注入凭据、只读用例筛选、写出报告 |
-| `src/snmp_test/service/app.py` | FastAPI 路由、会话 cookie、鉴权、报告分发、`/api/config` 能力查询 |
-| `config/web.example.yaml` | 多用户 token、live 白名单配置模板 |
+| `src/snmp_test/model/mib_compiler.py` + `model/mib_deps/` | 通用 MIB 导入：pysmi 只做 `IMPORTS` / 严格语法检查；离线标准符号表补齐外部父 OID 与文本约定 |
+| `src/snmp_test/service/jobs.py` | 默认 2 worker（上限 4）、同一 live 目标串行、`JobStore`（`work/jobs/jobs.jsonl` + `audit.jsonl`）、内存注入凭据、只读用例筛选、写出报告 |
+| `src/snmp_test/service/audit.py` | 把 MIB / 任务 / 探测三本日志聚合为统一时间线（`/audit` 与 `/api/audit`） |
+| `src/snmp_test/service/app.py` | FastAPI 路由、会话 cookie、鉴权、报告分发、MIB 树/告警接口、`/api/config` 能力查询 |
+| `config/web.example.yaml` | `security.web` 收紧模板（默认全开；旧顶层 `security.*` 不再读取） |
 
 **改动**：`executor.py` 的 `Runtime` 现在接受 `SecurityPolicy` 并在构造时就调用 `enforce()`；`cli.py` 把 `--allow-live` 转成同一策略对象；`config.py` 默认配置回退到 `config/config.example.yaml`（避免不加 `--config` 时误读 live 配置）；`pytest_plugin.py` 固定使用模拟配置。
 
@@ -334,9 +338,10 @@ python -c "import json;a=json.load(open('runs/verify-a/results.json',encoding='u
 ```
 POST /api/mibs  -> work/mibs/<id>/{原MIB, model.json, cases.json, meta.json}
 POST /api/jobs  -> work/jobs/jobs.jsonl（public_dict，无凭据）
-               -> runner.queue（单 worker）
+               -> runner.queue（默认 2 worker，同一 live 目标串行）
+               -> security.web 策略预检（allow_live / allowed_targets）
                -> load_config(web.yaml, overrides={目标/版本/凭据/端口/只读策略})
-               -> 筛选用例：operations={GET}, categories={normal},
+               -> 筛选用例：operations={GET, GETNEXT, GETBULK}, categories={normal},
                   exclude_tags={auth,flood,negative,guarded,blocked}, limit
                -> run_batch(..., security=SecurityPolicy(readonly_only=True))
                -> runs/web-<job_id>/{report.html, results.json, pdus.jsonl, ...}
@@ -350,21 +355,22 @@ GET /runs/{run_id}/report.html -> 带鉴权的静态报告
 
 | 约束 | CLI 单人版 | Web 多人版 |
 | --- | --- | --- |
-| live 确认 | 命令行 `--allow-live` | admin 角色 + `security.allow_live` + 目标白名单，三层同时满足 |
-| 闸口位置 | 曾在 `cli.py`（Python API 可绕过） | 下沉到 `Runtime.__init__`，API 与 CLI 共用 |
-| SET | 可用（有备份/还原/黑名单） | **不可达**：`readonly_only=True` 强制关闭，且只提交 GET 用例 |
-| 凭据 | `config/config.yaml` 明文（输出脱敏） | 每次任务提交时在内存注入，不写入任何文件 |
-| 并发 | 单进程单任务 | 单 worker 串行，队列排队 |
-| MIB | 唯一全局 `cases/generated/` | 每人/每项目内容寻址隔离 |
-| 报告 | 本地文件 | 带鉴权的 HTTP 路由 |
+| live 确认 | 命令行 `--allow-live` | 内网默认直连；可用 `security.web.allow_live` / `allowed_targets` 收紧 |
+| 闸口位置 | `Runtime.__init__` 的 `SecurityPolicy.enforce()` | `service/web_policy.py`，探测与任务提交共用 |
+| SET | 可用（有备份/还原/黑名单） | 批量任务不可达（只提交 GET/GETNEXT/GETBULK）；交互探测可用，需二次确认 + `hard_block` + 审计 |
+| 账号 | 无（单人或共享配置） | 邮箱注册 / 登录，所有账号权限一致（无角色） |
+| 凭据 | `config/config.yaml` 明文（输出脱敏） | 每次任务 / 探测时在内存注入，不写入任何文件 |
+| 并发 | 单进程按 `execution.concurrency` | 默认 2 worker（上限 4），同一 live 目标串行 |
+| MIB | 唯一全局 `cases/generated/` | 内容寻址的共享 MIB 库，每个 MIB 独立模型与用例 |
+| 报告 | 本地文件 | 带鉴权的 HTTP 路由，按账号隔离 |
+| 审计 | 运行目录日志 | `work/jobs/audit.jsonl` + `work/probe-audit.jsonl`，`/audit` 统一时间线 |
 
 ### 11.4 已验证与仍是 MVP 的部分
 
-已验证（`tests/test_service_security.py`、`tests/test_web_api.py` 共 13 项）：API 无法绕过 live 确认、白名单拒绝、只读策略生效、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有 GET、报告需鉴权、真实 uvicorn 进程 `/health` 与首页可访问。
+已验证（全量 `pytest` 共 161 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
 
 仍是 MVP、生产前需替换：
 
-- `AuthStore` 是轻量 token/RBAC 占位（常量时间比较 + HttpOnly cookie），应换成 OIDC/LDAP 与真实会话签名；
-- trap/inform 与 SET 暂未通过 Web 开放；
-- 任务状态存在单机 JSONL，多实例部署需要换成共享存储；
-- `live` 只读 GET 仍需按第 8 节所述补 OID 基线，否则未实现的 MIB 表会集中报 failed。
+- 账号存单机 SQLite、任务存单机 JSONL，多实例部署需要换成共享存储与 OIDC/LDAP；
+- trap/inform 暂未通过 Web 开放；
+- `live` 只读 GET 仍需按第 8 节所述补 OID 基线，否则未实现的 MIB 表会集中报 failed（下一步实现）。
