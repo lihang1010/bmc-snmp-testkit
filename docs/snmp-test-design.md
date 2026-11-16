@@ -224,13 +224,13 @@ case_id = "TC-" + sha256(
 - 必填变量绑定：`sysUpTime.0`、`snmpTrapOID.0`、`snmpTrapEnterprise.0`；v1 另有 `snmpTrapAddress.0` / `snmpTrapCommunity.0`；
 - 事件字段复用 `eventLogsTable` 列承载：`eventLogsEventID`（Record ID）、`TimeStamp`、`SensorName`、`SensorType`、`Description`、`EventType`；
 - 严重级别映射（§17.7 → `snmptrapSeverity`）：`00h/01h/02h/04h → info(1)`，`08h → waring(2)`，`10h/20h → critical(3)`；
-- 额外下发一个关联 OID `1.3.6.1.4.1.52305.9.1.0`（值为 `case_id`），使并发 trap 用例可精确匹配自己的通知。
+- 模拟 Agent 额外下发关联 OID `1.3.6.1.4.1.52305.9.1.0`（值为 `case_id`），使并发 trap 用例可精确匹配自己的通知；真实设备不会带该 varbind，因此 live 模式改用内容匹配。
 
 ### 7.3 触发方式与安全边界
 
 | 类型 | 行为 |
 | --- | --- |
-| `mock_event` | 模拟 Agent 在内存中合成事件并发送（默认且唯一自动触发方式） |
+| `mock_event` | 模拟 Agent 在内存中合成事件并发送；live 模式自动降级为 `passive` |
 | `passive` | 仅监听，等待被测端自行上报；live 模式推荐，零设备动作 |
 | `snmp_set` | 默认禁用，需 `explicitly_enabled` 与 `--allow-guarded` |
 | `external` | Redfish/IPMI 触发，默认禁用且框架不实现下发 |
@@ -241,7 +241,19 @@ case_id = "TC-" + sha256(
 
 `trap_received`、`trap_pdu_type`、`trap_version`、`trap_oid_in`、`trap_enterprise`、`trap_community`、`trap_security_name`、`trap_severity`、`trap_varbinds`（OID/类型/值/包含子串）、`trap_latency`、`trap_ack`、`trap_source`。
 
-监听器基于 `NotificationReceiver`：对 confirmed PDU（inform）自动回送响应，实现 §30.8 的确认语义；用固定 USM engine ID 预置 v3 trap 用户，避免 originator 作为权威引擎时的发现失败。
+监听器基于 `NotificationReceiver`：对 confirmed PDU（inform）自动回送响应，实现 §30.8 的确认语义。
+
+### 7.5 live 匹配与凭据
+
+真实设备不可能注入 `case_id`，因此 live 模式按以下条件匹配一条通知：
+
+1. `pdu_type`（trap / inform）与 `version`；
+2. `expected_trap_oids`（为空时匹配该版本/来源的任意通知）；
+3. 来源地址包含目标 `host`（可在期望中用 `source` 覆盖或清空以放宽）；
+4. 记录接收时间不早于本次等待开始时间；
+5. 每条记录只能被一个用例认领（`claimed_by`），避免同一 trap 被重复计数。
+
+凭据不再要求同时写进 `mock` 段：监听器启动时注册每个 `targets[]` 的 v1/v2c 团体字与 v3 用户。v2c/v1 trap 直接可用；v3 inform 以监听器为权威引擎，默认用户即可；v3 trap 的权威引擎是发送端，执行器会在首条 v3 TRAP 用例前通过 `snmpEngineID.0` 自动发现并注册该引擎的用户（也可在 `targets[].v3.trap_engine_id` 直接指定十六进制 ID 跳过发现）。
 
 ---
 

@@ -19,7 +19,7 @@ from snmp_test.runner.safety import SafetyAbort, SafetyGateway, load_policy
 from snmp_test.security import SecurityPolicy
 from snmp_test.snmp.errors import is_timeout
 from snmp_test.snmp.mock_agent import MockAgent
-from snmp_test.snmp.trap_listener import TrapListener
+from snmp_test.snmp.trap_listener import TrapListener, engine_id_hex
 from snmp_test.snmp.transport import TransportPool
 from snmp_test.snmp.triggers import TriggerAdapter
 
@@ -62,6 +62,8 @@ class Runtime:
         self.set_locks: dict[str, asyncio.Lock] = {}
         self.trap_lock = asyncio.Lock()
         self.aborted_targets: set[str] = set()
+        self._trap_targets_ready: set[str] = set()
+        self._trap_engines_ready: set[str] = set()
         self.oid_baseline = bool(ex.get("oid_baseline", False))
         self.oid_baseline_max = max(1, int(ex.get("oid_baseline_max", 20000)))
         self._baseline_cache: dict[tuple[str, str], set[str] | None] = {}
@@ -308,7 +310,7 @@ class Runtime:
                             await self._execute_set(target, case, result)
                     elif case.operation in ("TRAP", "INFORM"):
                         async with self.trap_lock:
-                            await self._execute_trap(case, result)
+                            await self._execute_trap(target, case, result)
                     else:
                         await self._execute_read(target, case, result)
         except SafetyAbort as exc:
@@ -364,16 +366,69 @@ class Runtime:
             operation="SET", response=response, note="guarded backup/set/restore",
         )
 
-    async def _execute_trap(self, case: TestCase, result: CaseResult) -> None:
-        fired = await self.triggers.fire(case)
+    async def _prepare_trap_target(self, target: TargetConfig, *, need_engine_id: bool) -> None:
+        """Register target credentials, discovering its v3 engine id if needed."""
+        v3 = dict(target.v3 or {})
+        if target.name not in self._trap_targets_ready:
+            self._trap_targets_ready.add(target.name)
+            self.listener.register_target(target)
+        if not need_engine_id or target.name in self._trap_engines_ready:
+            return
+        self._trap_engines_ready.add(target.name)
+        if not v3.get("user"):
+            return
+        engine_hex = engine_id_hex(v3.get("trap_engine_id") or "")
+        if not engine_hex and self.cfg.mode == "live" and "v3" in target.versions:
+            try:
+                session = await self.pool.session(target, "v3")
+                response = await session.get(["1.3.6.1.6.3.10.2.1.1.0"])
+                varbind = response.varbinds[0] if response.varbinds else None
+                if not response.error_indication and varbind is not None and varbind.exception is None:
+                    engine_hex = engine_id_hex(varbind.value)
+            except Exception as exc:
+                self.collector.logger.warning(
+                    "trap: could not discover v3 engine id for %s: %s", target.name, exc,
+                )
+        if engine_hex:
+            try:
+                self.listener.register_target(target, engine_hex)
+            except Exception as exc:
+                self.collector.logger.warning("trap: could not register %s: %s", target.name, exc)
+                return
+            self.collector.logger.info(
+                "trap: registered v3 engine %s for %s", engine_hex, target.name,
+            )
+
+    async def _execute_trap(self, target: TargetConfig, case: TestCase, result: CaseResult) -> None:
         exp = case.payload.get("trap_expectation") or {}
-        trap: TrapRecord | None = await self.listener.wait_for(
-            case.case_id,
-            pdu_type=exp.get("pdu_type"),
-            version=exp.get("version"),
-            after=float(fired.get("triggered_at") or 0.0),
-            timeout=float(exp.get("max_latency_s") or self.cfg.trap.get("receive_timeout_s", 5.0)),
+        version = str(exp.get("version") or case.version)
+        # Only unconfirmed v3 notifications are originator-authoritative.
+        await self._prepare_trap_target(
+            target, need_engine_id=case.operation == "TRAP" and version == "v3",
         )
+        fired = await self.triggers.fire(case)
+        timeout = float(exp.get("max_latency_s") or self.cfg.trap.get("receive_timeout_s", 5.0))
+        if fired.get("passive"):
+            # Live matching cannot rely on the mock-only correlation varbind.
+            trap: TrapRecord | None = await self.listener.wait_for_match(
+                pdu_type=str(exp.get("pdu_type") or ("inform" if case.operation == "INFORM" else "trap")),
+                version=version,
+                trap_oids=exp.get("expected_trap_oids") or (),
+                source=str(exp.get("source") or target.host),
+                after=float(fired.get("triggered_at") or time.time()),
+                claimant=case.case_id,
+                claim=True,
+                timeout=timeout,
+            )
+        else:
+            trap = await self.listener.wait_for(
+                case.case_id,
+                pdu_type=exp.get("pdu_type"),
+                version=exp.get("version"),
+                after=float(fired.get("triggered_at") or 0.0),
+                timeout=timeout,
+                claim=True,
+            )
         outcome = evaluate(case, trap=trap, trigger=fired)
         result.actual = {
             "trigger": fired,

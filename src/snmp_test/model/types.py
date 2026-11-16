@@ -401,6 +401,7 @@ class TrapRecord:
     received_at: float = 0.0
     correlation_id: str = ""
     ack_sent: bool = False
+    claimed_by: str = ""  # case_id that consumed this record
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -420,6 +421,7 @@ class TrapExpectation:
     enterprise_oid: str = ""
     community: str = ""
     security_name: str = ""
+    source: str = ""
     varbinds: tuple[dict[str, Any], ...] = ()
     severity: int | None = None
     max_latency_s: float = 5.0
@@ -437,6 +439,7 @@ class TrapExpectation:
             enterprise_oid=str(data.get("enterprise_oid", "")),
             community=str(data.get("community", "")),
             security_name=str(data.get("security_name", "")),
+            source=str(data.get("source", "")),
             varbinds=tuple(dict(v) for v in (data.get("varbinds") or [])),
             severity=int(data["severity"]) if data.get("severity") is not None else None,
             max_latency_s=float(data.get("max_latency_s", 5.0)),

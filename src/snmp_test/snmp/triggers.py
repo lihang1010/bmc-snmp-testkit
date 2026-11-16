@@ -38,7 +38,14 @@ class TriggerAdapter:
             result["reason"] = "trigger disabled in configuration"
         elif kind == "mock_event":
             if self.mock_agent is None:
-                result["reason"] = "mock agent is not running (live mode: use passive triggers)"
+                if str(self.cfg.mode).lower() == "live":
+                    # A real BMC cannot be asked to synthesise the mock event;
+                    # listen for a device-originated notification instead.
+                    result["ok"] = True
+                    result["passive"] = True
+                    result["reason"] = "live mode: mock_event downgraded to passive listening"
+                else:
+                    result["reason"] = "mock agent is not running (live mode: use passive triggers)"
             else:
                 sent = await self.mock_agent.emit_event(case)
                 result["ok"] = not sent.get("error_indication")
@@ -46,6 +53,7 @@ class TriggerAdapter:
                 result["detail"] = sent
         elif kind == "passive":
             result["ok"] = True
+            result["passive"] = True
             result["reason"] = "passive listening only, no device action"
         elif kind in ("snmp_set", "external"):
             result["reason"] = (

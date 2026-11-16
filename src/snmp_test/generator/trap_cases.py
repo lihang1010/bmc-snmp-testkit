@@ -38,6 +38,8 @@ def _trap_assertions(exp: TrapExpectation) -> list[dict[str, Any]]:
         assertions.append({"kind": "trap_community", "expected": exp.community})
     if exp.security_name:
         assertions.append({"kind": "trap_security_name", "expected": exp.security_name})
+    if exp.source:
+        assertions.append({"kind": "trap_source", "expected": exp.source})
     if exp.severity is not None:
         assertions.append({"kind": "trap_severity", "expected": exp.severity})
     if exp.varbinds:
@@ -90,6 +92,7 @@ def generate_trap_cases(
                         "enterprise_oid": exp.enterprise_oid,
                         "community": exp.community,
                         "security_name": exp.security_name,
+                        "source": exp.source,
                         "varbinds": [dict(v) for v in exp.varbinds],
                         "severity": exp.severity,
                         "max_latency_s": exp.max_latency_s,

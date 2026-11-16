@@ -45,6 +45,9 @@ targets:
   #     priv_protocol: AES128
   #     priv_key: ${BMC_V3_PRIV_KEY}
   #     security_level: authPriv
+  #     # v3 trap 以发送端为权威引擎；留空则首条 v3 TRAP 前自动 GET snmpEngineID.0。
+  #     # 目标不可达时可手填十六进制 ID，例如 800000000102030405。
+  #     trap_engine_id: ""
 
 mock:
   bind_host: 127.0.0.1
@@ -66,6 +69,8 @@ trap:
   listen_port: 11612
   receive_timeout_s: 5.0
   expectations_file: config/trap-expectations.yaml
+  # 监听器会自动注册 targets[] 的团体字/v3 用户用于 live trap；
+  # live 下 mock_event 触发自动降级为 passive（只等设备上报，不主动改状态）。
 
 execution:
   concurrency: 12

@@ -285,8 +285,8 @@ python -c "import json;a=json.load(open('runs/verify-a/results.json',encoding='u
 | 边界 | 现状 | 影响 |
 | --- | --- | --- |
 | MIB 声明 ≠ 实机实现 | GET 用例默认断言 `no_error`，设备回 `noSuchName` / `NoSuchObject` 就判 `failed` | 真实 BMC 上未实现的表/行会集中报 failed。**这不是协议缺陷**。本轮 `raidPhysicalInfoTable` 整表 4 个 OID 全 NoSuchObject 即属此类。目前**没有 OID 基线机制**去区分「预期缺失」与「真实缺陷」 |
-| trap/inform 在 live 下跑不通 | 监听器用专用关联 varbind `1.3.6.1.4.1.52305.9.1.0`（值=case_id）匹配，只有本地模拟 Agent 会注入；`trap-expectations.yaml` 6 条期望都是 `type: mock_event`，live 下没有模拟 Agent | 真实 BMC 的 trap 不会带该 varbind，用例会超时失败。需改为按 `version + pdu_type + trap_oid + source + 时间窗` 匹配，并把 trigger 改成 `passive` |
-| trap 监听器凭据来源 | `TrapListener.start()` 读的是 `mock.communities` / `mock.v3`，不是 `targets[]` | live 下要收 v3 trap，必须把 BMC 的 trap 凭据也填进 `mock` 段 |
+| trap/inform 的 live 匹配 | 关联 varbind `1.3.6.1.4.1.52305.9.1.0` 只有本地模拟 Agent 会注入 | live 模式已改为按 `version + pdu_type + trap_oid + source + 时间窗` 匹配并认领记录；`mock_event` 在 live 下自动降级为 passive。真实设备仍须自己产生通知，否则用例在 `max_latency_s` 后判 failed |
+| trap 监听器凭据来源 | 启动时注册 `targets[]` 的 v1/v2c 团体字与 v3 用户（`mock` 段仍保留给模拟 Agent） | v3 trap 需先发现发送端 engine ID：执行器在首条 v3 TRAP 前 GET `snmpEngineID.0` 并注册；不可达的 v3 目标可在 `targets[].v3.trap_engine_id` 直接指定十六进制 ID |
 | GETNEXT/GETBULK 起点 | 起点基于 MIB 声明的列 OID，未做实机 OID 树发现 | 实机 OID 树与 MIB 不一致时，顺序断言可能失败 |
 | `--ops` / `--modules` 等筛选 | 精确字符串匹配，不是模糊匹配 | 写错大小写会筛出 0 条 |
 | `--config` 参数位置 | 是**全局参数**，必须写在子命令之前 | `run --config ...` 会报 unrecognized arguments |

@@ -17,10 +17,17 @@
 # 事件字段，严重级别按 §17.7 映射到 snmptrapSeverity 的 info(1)/waring(2)/critical(3)。
 #
 # 触发方式：
-#   mock_event  : 模拟 Agent 在内存中合成事件并发出 trap/inform（默认且唯一自动触发方式）
+#   mock_event  : 模拟 Agent 在内存中合成事件并发出 trap/inform（默认）
+#                  —— live 模式没有模拟 Agent，执行器自动降级为 passive 内容匹配
 #   passive     : 仅监听，等待被测端自行上报（live 模式推荐，不产生任何状态变更）
 #   snmp_set    : 通过安全 SET 触发；默认禁用，需 explicitly_enabled: true
 #   external    : Redfish/IPMI 外部触发；默认禁用且必须显式开启（本框架不实现下发）
+#
+# live 匹配：真实设备的 trap 不带 mock 关联 OID，监听器按
+#   version + pdu_type + expected_trap_oids + 来源地址 + 时间窗 匹配，并保证一条
+#   记录只被一个用例认领。可选字段 source 用于覆盖目标 host（留空表示不限制来源）。
+#   v3 trap 的发送端 engine ID 会在首条 v3 TRAP 前自动发现，或由
+#   targets[].v3.trap_engine_id 指定。
 version: 1
 
 conventions:

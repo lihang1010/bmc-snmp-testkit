@@ -143,6 +143,13 @@ docs/how-it-works.md          # 白盒说明（实际跑起来发生了什么、
 
 **可重复执行**：`case_id` 由 `MIB SHA-256 + 节点名 + OID + 操作 + 版本 + 类别 + 判别码` 派生；相同 MIB 与配置重复 `generate` 得到完全相同的用例集；`--rerun` 固化失败集合；`run_id` 目录隔离，历史产物不覆盖。
 
+### trap / inform（mock 与 live）
+
+- mock 模式：模拟 Agent 按 `config/trap-expectations.yaml` 在内存合成事件，并注入 `1.3.6.1.4.1.52305.9.1.0` 关联 varbind，按 `case_id` 精确匹配。
+- live 模式：`mock_event` 自动降级为 passive，按 `version + pdu_type + trap OID + 来源地址 + 时间窗` 匹配；每条记录只被一个用例认领，避免重复计数。期望中的 `source` 可覆盖来源过滤（留空表示不限制）。
+- 监听器自动注册 `targets[]` 的 v1/v2c 团体字与 v3 用户；v3 trap 的发送端 engine ID 在首条 v3 TRAP 前通过 `snmpEngineID.0` 自动发现，也可在 `targets[].v3.trap_engine_id` 指定。
+- 真实设备仍须自己产生通知；框架不会为触发 trap 向 BMC 下发任何 IPMI/Redfish 状态变更命令。
+
 ## 6. 验收基线（本地模拟 Agent）
 
 | 指标 | 值 |
