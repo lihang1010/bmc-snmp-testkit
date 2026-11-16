@@ -26,6 +26,14 @@
 # 旧的顶层 security.allow_live / allowed_targets 与 auth.users 属于历史模板，不再读取。
 # 被策略拒绝的操作也写入审计（policy_denied）。
 
+# 交互探测（MIB 浏览器 / 探测面板）的吞吐与连接复用：
+# 会话按「目标 + SNMP 版本 + 凭据」缓存复用，WALK 在 v2c/v3 下用 GETBULK 批量拉取。
+# probe:
+#   concurrency: 4              # live 探测最大并发请求数
+#   rate_limit_ms: 0            # 同一目标两次请求的最小间隔（毫秒）；0 = 不限速
+#   session_ttl_s: 300          # 空闲会话保留时间，超时后关闭
+#   session_cache_size: 16      # 最多缓存的会话数，超出按 LRU 关闭最久未用的
+
 # 说明：
 #  - MIB 库所有账号共享；任务队列按账号隔离，只能看到自己的任务与报告。
 #  - 目标端口、SNMP 版本、团体字 / v3 凭据在任务提交时内存传入，不写入本文件。

@@ -62,6 +62,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "trap": {"listen_host": "127.0.0.1", "listen_port": 11612, "receive_timeout_s": 5.0},
     "execution": {
         "concurrency": 12,
+        "live_concurrency": 4,
+        "request_interval_ms": 0,
         "timeout_s": 2.0,
         "retries": 1,
         "rows_per_table": 2,

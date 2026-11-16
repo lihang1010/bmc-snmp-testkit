@@ -452,12 +452,26 @@ def test_cancel_running_job(tmp_path):
             assert final["status"] == "cancelled", final
 
 
+def test_probe_reuses_snmp_session(web):
+    """Repeated probes with the same target/version/credential share one session."""
+    client, _, app, alice, _ = web
+    body = {"mode": "mock", "version": "v2c", "operation": "GET",
+            "oid": "1.3.6.1.2.1.1.1.0"}
+    for _ in range(3):
+        r = client.post("/api/snmp/probe", headers=_headers(alice), json=body)
+        assert r.status_code == 200 and r.json()["ok"], r.text
+    probe = app.state.probe
+    keys = [k for k in probe._sessions if k[0] == "mock" and k[3] == "v2c"]
+    assert len(keys) == 1, list(probe._sessions)
+
+
 def test_snmp_probe(web):
     client, _, _, alice, _ = web
     caps = client.get("/api/snmp/capabilities", headers=_headers(alice)).json()
     assert caps["operations"] == ["GET", "GETNEXT", "WALK", "SET"]
     assert caps["mock_set"] is True and caps["live_set"] is True
     assert caps["audit_enabled"] is True
+    assert caps["session_cache_size"] >= 1
 
     base = {"mode": "mock", "version": "v1"}
     got = client.post(

@@ -88,7 +88,7 @@ python -m pytest -q
 | `targets[]` | 多目标批量：名称、host、port、versions、v1/v2c 团体字（读写 + 只读各一套）、v3 USM 用户与 auth/priv 协议密钥、错误凭据样本 |
 | `mock` | 模拟 Agent 绑定地址/端口、trap 目的端口、每表行数、只读/读写团体字、v3 用户 |
 | `trap` | 监听地址/端口、接收超时、期望文件 |
-| `execution` | 并发数、超时/重试、每表行数与用例上限、max-varbinds、GETBULK max-repetitions、SET 开关、`allow_guarded`、`limit`、随机种子 |
+| `execution` | 并发数、超时/重试、每表行数与用例上限、max-varbinds、GETBULK max-repetitions、live 单目标并发（`live_concurrency`）与请求间隔（`request_interval_ms`）、SET 开关、`allow_guarded`、`limit`、随机种子 |
 | `safety.policy_file` | 安全策略文件 |
 | `report` | 输出目录、PDU 采样率、日志级别、trap 期望文件 |
 
@@ -185,7 +185,7 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 
 **邮件配置**：设置 `SNMP_TEST_SMTP_HOST`、`SNMP_TEST_SMTP_PORT`、`SNMP_TEST_SMTP_USER`、`SNMP_TEST_SMTP_PASSWORD`、`SNMP_TEST_SMTP_FROM`（可选 `SNMP_TEST_SMTP_TLS` / `SNMP_TEST_SMTP_SSL`）后真发邮件。未配置时进入开发模式：验证码写入 `work/mail-dev.log` 并直接显示在登录页。账号、验证码与会话保存在 `work/auth.db`（SQLite），密码用 PBKDF2-HMAC-SHA256 加盐存储，会话为服务端随机 token + HttpOnly Cookie（默认 7 天）。
 
-**MIB 浏览器**（`/mib-browser`）：导入 MIB 后左侧是可展开的 OID 树（组 / 表 / 表项 / 列；WALK 之后还会挂出动态发现的实例行），右侧是结果区。填目标 IP 后单击节点即可即时 `GET` / `WALK`，结果默认按 MIB 表结构聚合成二维表格（行 = 实例、列 = 表列），可切换「Table View / 仅表格 / Raw（原始 OID）」。支持枚举值→文本、OID→节点名、点击行查看完整实例详情、CSV 导出、自动刷新、右键菜单与 `SET`（二次确认）。WALK 按 `cursor` 自动续页取全整表，不受单页 200 条限制；所有操作写入 `work/probe-audit.jsonl`。探测请求携带当前选中的 `mib_id`，切换 MIB 后探测与模拟 Agent 都会使用新模型，不再默认取最近上传的 MIB。
+**MIB 浏览器**（`/mib-browser`）：导入 MIB 后左侧是可展开的 OID 树（组 / 表 / 表项 / 列；WALK 之后还会挂出动态发现的实例行），右侧是结果区。填目标 IP 后单击节点即可即时 `GET` / `WALK`，结果默认按 MIB 表结构聚合成二维表格（行 = 实例、列 = 表列），可切换「Table View / 仅表格 / Raw（原始 OID）」。支持枚举值→文本、OID→节点名、点击行查看完整实例详情、CSV 导出、自动刷新、右键菜单与 `SET`（二次确认）。WALK 按 `cursor` 自动续页取全整表，不受单页 200 条限制（v2c / v3 用 GETBULK 批量拉取，v1 退回 GETNEXT）；同一目标的 SNMP 会话按「目标 + 版本 + 凭据」缓存复用，空闲超过 TTL 或缓存满时才关闭重建。所有操作写入 `work/probe-audit.jsonl`。探测请求携带当前选中的 `mib_id`，切换 MIB 后探测与模拟 Agent 都会使用新模型，不再默认取最近上传的 MIB。
 
 主页面「提交只读任务」与探测面板同样固定 `live` 直连真实 BMC，目标 IP 必填；Web 界面不再提供「本地自测」开关。模拟 Agent 仅供 CLI `snmp-test run` / `mock-agent` 与 pytest 离线回归使用——它验证解析 / 生成 / 断言 / SNMP 适配层，**不能证明真机兼容性**。
 
@@ -200,7 +200,7 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 
 - Web 层默认不设 live 白名单（`security.web.allowed_targets: []`），需要收紧时在 `config/web.yaml` 配置；CLI 的 `--allow-live` 与 `Runtime` 的 `SecurityPolicy.enforce` 闸口保持不变，只约束命令行调用。
 - 团体字 / v3 密钥只在任务提交或即时探测时经内存注入，不写入任何配置或任务文件；日志、报告、快照全部脱敏。
-- 任务队列默认 2 个 worker 并发（`SNMP_TEST_WEB_WORKERS`，上限 4），按目标互斥：同一台 live BMC 同时只跑一个批次，后到的任务标记「等待中」并自动排队。CLI / pytest 的模拟 Agent 端口 `11811 + slot*10`、trap 监听 `11812 + slot*10`（与 CLI `11611/11612`、测试 `11711/11712` 错开）。
+- 任务队列默认 2 个 worker 并发（`SNMP_TEST_WEB_WORKERS`，上限 4），按目标互斥：同一台 live BMC 同时只跑一个批次，后到的任务标记「等待中」并自动排队。交互探测默认 4 个 live 请求并发、不限速，可在 `config/web.yaml` 的 `probe` 段调整 `concurrency` / `rate_limit_ms`，会话缓存参数见 `config/web.example.yaml`。CLI / pytest 的模拟 Agent 端口 `11811 + slot*10`、trap 监听 `11812 + slot*10`（与 CLI `11611/11612`、测试 `11711/11712` 错开）。
 
 **主要接口**
 

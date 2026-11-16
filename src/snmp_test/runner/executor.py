@@ -58,7 +58,12 @@ class Runtime:
         self.run_dir = Path(run_dir) if run_dir else output / self.run_id
         ex = cfg.execution
         self.concurrency = max(1, int(ex.get("concurrency", 12)))
+        self.live_concurrency = max(0, int(ex.get("live_concurrency", 4)))
+        self.request_interval_ms = max(0.0, float(ex.get("request_interval_ms", 0)))
         self.sem = asyncio.Semaphore(self.concurrency)
+        self._target_sems: dict[str, asyncio.Semaphore] = {}
+        self._next_request_at: dict[str, float] = {}
+        self._throttle_lock = asyncio.Lock()
         self.set_locks: dict[str, asyncio.Lock] = {}
         self.trap_lock = asyncio.Lock()
         self.aborted_targets: set[str] = set()
@@ -289,30 +294,7 @@ class Runtime:
         )
         try:
             async with self.sem:
-                if case.expectation.get("skip"):
-                    result.status = "skipped"
-                    result.message = str(case.expectation.get("reason", "skipped by design"))
-                elif self.dry_run:
-                    result.status = "skipped"
-                    result.message = "dry-run: no PDU sent"
-                else:
-                    allowed, reason = self.safety.check(case)
-                    if not self.security.allows_operation(case.operation):
-                        allowed, reason = False, f"read-only service forbids operation {case.operation}"
-                    if not allowed:
-                        result.status = "blocked"
-                        result.message = reason
-                    elif case.operation == "SET" and target.name in self.aborted_targets:
-                        result.status = "error"
-                        result.message = "target SET cases aborted after a failed restore"
-                    elif case.operation == "SET":
-                        async with self.set_locks.setdefault(target.name, asyncio.Lock()):
-                            await self._execute_set(target, case, result)
-                    elif case.operation in ("TRAP", "INFORM"):
-                        async with self.trap_lock:
-                            await self._execute_trap(target, case, result)
-                    else:
-                        await self._execute_read(target, case, result)
+                await self._execute_guarded(target, case, result)
         except SafetyAbort as exc:
             self.aborted_targets.add(target.name)
             result.status = "error"
@@ -326,6 +308,61 @@ class Runtime:
         self.collector.add(result)
         self._bump_progress(result)
         return result
+
+    async def _execute_guarded(self, target: TargetConfig, case: TestCase, result: CaseResult) -> None:
+        if case.expectation.get("skip"):
+            result.status = "skipped"
+            result.message = str(case.expectation.get("reason", "skipped by design"))
+            return
+        if self.dry_run:
+            result.status = "skipped"
+            result.message = "dry-run: no PDU sent"
+            return
+        allowed, reason = self.safety.check(case)
+        if not self.security.allows_operation(case.operation):
+            allowed, reason = False, f"read-only service forbids operation {case.operation}"
+        if not allowed:
+            result.status = "blocked"
+            result.message = reason
+            return
+        if self.cfg.mode == "live":
+            await self._throttle(target)
+        target_sem = None
+        if self.cfg.mode == "live" and self.live_concurrency > 0:
+            target_sem = self._target_sems.setdefault(
+                target.name, asyncio.Semaphore(self.live_concurrency)
+            )
+        if target_sem is not None:
+            async with target_sem:
+                await self._dispatch(target, case, result)
+        else:
+            await self._dispatch(target, case, result)
+
+    async def _dispatch(self, target: TargetConfig, case: TestCase, result: CaseResult) -> None:
+        if case.operation == "SET" and target.name in self.aborted_targets:
+            result.status = "error"
+            result.message = "target SET cases aborted after a failed restore"
+        elif case.operation == "SET":
+            async with self.set_locks.setdefault(target.name, asyncio.Lock()):
+                await self._execute_set(target, case, result)
+        elif case.operation in ("TRAP", "INFORM"):
+            async with self.trap_lock:
+                await self._execute_trap(target, case, result)
+        else:
+            await self._execute_read(target, case, result)
+
+    async def _throttle(self, target: TargetConfig) -> None:
+        """Space out requests to one live target (no-op when interval is 0)."""
+        if self.request_interval_ms <= 0:
+            return
+        interval = self.request_interval_ms / 1000.0
+        async with self._throttle_lock:
+            now = time.monotonic()
+            wait = self._next_request_at.get(target.name, 0.0) - now
+            if wait > 0:
+                await asyncio.sleep(wait)
+                now += wait
+            self._next_request_at[target.name] = now + interval
 
     def _override(self, target: TargetConfig, case: TestCase) -> dict[str, Any]:
         override = dict(case.payload.get("credential_override") or {})

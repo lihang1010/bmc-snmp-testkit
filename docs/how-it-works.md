@@ -41,7 +41,7 @@ python -m snmp_test.cli --config config/config.yaml run --allow-live --no-set `
 | 3 | live 闸口 | `mode: live` 且 CLI 带 `--allow-live` 才继续，否则退出码 2、不发任何包 | `cli.py` 的 `cmd_run` |
 | 4 | 加载用例 | 读 `cases/generated/cases.json`（7703 条），按 `--versions/--ops/--categories/--exclude-tags/--limit` 过滤 → 本轮 10 条 | `CaseStore.select()` |
 | 5 | 启动运行时 | 建一个事件循环、会话池、`trap` 监听器、结果收集器；**只有 `mode: mock` 才启动本地模拟 Agent** | `Runtime.start()` |
-| 6 | 逐用例调度 | 只读用例按 `concurrency` 信号量并发（每批 400 条）；SET 按目标串行加锁；trap 全局串行 | `executor.py` |
+| 6 | 逐用例调度 | 只读用例按 `concurrency` 信号量并发；live 模式再受单目标 `live_concurrency` 与 `request_interval_ms` 约束；SET 按目标串行加锁；trap 全局串行 | `executor.py` |
 | 7 | 安全复核 | 每个 SET 用例再次分级校验；非 SET 直接放行 | `SafetyGateway.check()` |
 | 8 | 发 PDU | 按 `(target, version, credential-override)` 复用一个 `SnmpEngine`；构造 varbind → 发 UDP → 归一化响应 | `snmp/transport.py` |
 | 9 | 断言 | 把 `TestCase.expectation.assertions` 逐条与 `SnmpResponse` 比较，收集所有失败原因 | `runner/assertions.py` 的 `evaluate()` |
@@ -366,7 +366,7 @@ GET /runs/{run_id}/report.html -> 带鉴权的静态报告
 | SET | 可用（有备份/还原/黑名单） | 批量任务不可达（只提交 GET/GETNEXT/GETBULK）；交互探测可用，需二次确认 + `hard_block` + 审计 |
 | 账号 | 无（单人或共享配置） | 邮箱注册 / 登录，所有账号权限一致（无角色） |
 | 凭据 | `config/config.yaml` 明文（输出脱敏） | 每次任务 / 探测时在内存注入，不写入任何文件 |
-| 并发 | 单进程按 `execution.concurrency` | 默认 2 worker（上限 4），同一 live 目标串行 |
+| 并发 | 单进程按 `execution.concurrency`，live 单目标再受 `live_concurrency` / `request_interval_ms` 约束 | 默认 2 worker（上限 4），同一 live 目标串行；交互探测默认 4 并发（`probe.concurrency`），会话按目标+版本+凭据复用缓存 |
 | MIB | 唯一全局 `cases/generated/` | 内容寻址的共享 MIB 库，每个 MIB 独立模型与用例 |
 | 报告 | 本地文件 | 带鉴权的 HTTP 路由，按账号隔离 |
 | 审计 | 运行目录日志 | `work/jobs/audit.jsonl` + `work/probe-audit.jsonl`，`/audit` 统一时间线 |

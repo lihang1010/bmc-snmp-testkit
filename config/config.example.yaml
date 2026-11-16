@@ -74,6 +74,8 @@ trap:
 
 execution:
   concurrency: 12
+  live_concurrency: 4            # live 模式下同一目标的最大并发用例；0 = 仅受 concurrency 限制
+  request_interval_ms: 0         # 同一目标两次请求的最小间隔（毫秒）；0 = 不限速
   timeout_s: 2.0
   retries: 1
   rows_per_table: 2

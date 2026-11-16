@@ -19,8 +19,11 @@ import os
 import re
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from snmp_test.config import load_config
 from snmp_test.model.types import MibModel
@@ -37,6 +40,13 @@ MAX_WALK = 200
 OID_RE = re.compile(r"^\.?[0-9]+(\.[0-9]+)+$")
 ASN1_TYPES = ("Integer32", "OctetString", "IpAddress", "ObjectIdentifier", "TimeTicks", "Null")
 OPERATIONS = ("GET", "GETNEXT", "WALK", "SET")
+
+
+def _oid_key(oid: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(part) for part in oid.strip(".").split("."))
+    except ValueError:
+        return ()
 
 
 class ProbeError(ValueError):
@@ -101,6 +111,25 @@ class ProbeService:
         # Mock probes share one UDP port, so switching MIBs must not restart the
         # agent while another mock request is still using it.
         self._mock_lock = asyncio.Lock()
+        probe_cfg = self._probe_settings()
+        self.concurrency = max(1, int(probe_cfg.get("concurrency", 4)))
+        self.rate_limit_ms = max(0.0, float(probe_cfg.get("rate_limit_ms", 0)))
+        self.session_ttl = max(1.0, float(probe_cfg.get("session_ttl_s", 300)))
+        self.session_cache_size = max(1, int(probe_cfg.get("session_cache_size", 16)))
+        self._live_sem = asyncio.Semaphore(self.concurrency)
+        self._sessions: OrderedDict[tuple[Any, ...], tuple[SnmpSession, float]] = OrderedDict()
+        self._session_lock = asyncio.Lock()
+        self._next_request_at: dict[str, float] = {}
+        self._throttle_lock = asyncio.Lock()
+
+    def _probe_settings(self) -> dict[str, Any]:
+        if not self.config_path.is_file():
+            return {}
+        try:
+            raw = yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return {}
+        return dict(raw.get("probe") or {})
 
     # ------------------------------------------------------------- policy
     def capabilities(self) -> dict[str, Any]:
@@ -120,6 +149,9 @@ class ProbeService:
             "max_walk": MAX_WALK,
             "mock_port": self.mock_port,
             "asn1_types": list(ASN1_TYPES),
+            "probe_concurrency": self.concurrency,
+            "probe_rate_limit_ms": self.rate_limit_ms,
+            "session_cache_size": self.session_cache_size,
         }
 
     def _deny(self, req: dict[str, Any], user: str, reason: str) -> None:
@@ -159,6 +191,11 @@ class ProbeService:
             if self._agent is not None:
                 await self._agent.stop()
                 self._agent = None
+        async with self._session_lock:
+            sessions = [entry[0] for entry in self._sessions.values()]
+            self._sessions.clear()
+        for session in sessions:
+            await session.close()
 
     # ------------------------------------------------------------- config
     def _model_and_mib(self, mib_id: str | None = None) -> tuple[MibModel, Path, str]:
@@ -253,6 +290,86 @@ class ProbeService:
             self._agent_mib_id = mib_id
 
     # ------------------------------------------------------------- execute
+    @staticmethod
+    def _session_key(cfg: Any, target: Any, version: str, cred: dict[str, Any]) -> tuple[Any, ...]:
+        cred_part = tuple(sorted((str(k), str(v)) for k, v in cred.items()))
+        return (cfg.mode, target.host, target.port, version, cred_part)
+
+    async def _acquire_session(self, cfg: Any, target: Any, version: str, cred: dict[str, Any]) -> SnmpSession:
+        """Reuse an idle session; v3 discovery and UDP sockets are expensive."""
+        key = self._session_key(cfg, target, version, cred)
+        now = time.monotonic()
+        async with self._session_lock:
+            entry = self._sessions.get(key)
+            if entry is not None and now - entry[1] <= self.session_ttl:
+                self._sessions.move_to_end(key)
+                self._sessions[key] = (entry[0], now)
+                return entry[0]
+            if entry is not None:
+                self._sessions.pop(key, None)
+                await entry[0].close()
+            session = SnmpSession(cfg, target, version, override=cred)
+            await session.open()
+            self._sessions[key] = (session, now)
+            while len(self._sessions) > self.session_cache_size:
+                _, (stale, _) = self._sessions.popitem(last=False)
+                await stale.close()
+            return session
+
+    async def _throttle(self, host: str) -> None:
+        if self.rate_limit_ms <= 0:
+            return
+        interval = self.rate_limit_ms / 1000.0
+        async with self._throttle_lock:
+            now = time.monotonic()
+            wait = self._next_request_at.get(host, 0.0) - now
+            if wait > 0:
+                await asyncio.sleep(wait)
+                now += wait
+            self._next_request_at[host] = now + interval
+
+    async def _walk(
+        self, session: SnmpSession, version: str, oid: str, cursor: str, limit: int,
+    ) -> tuple[list[Any], str, bool]:
+        """Walk a subtree, using GETBULK on v2c/v3 to cut round trips by ~25x."""
+        prefix = oid.lstrip(".")
+        walk_cursor = cursor or oid
+        varbinds: list[Any] = []
+        error = ""
+        while len(varbinds) < limit:
+            remaining = limit - len(varbinds)
+            if version == "v1":
+                step = await session.get_next([walk_cursor])
+                candidates = list(step.varbinds[:1])
+            else:
+                step = await session.get_bulk(
+                    [walk_cursor], non_repeaters=0, max_repetitions=min(25, remaining),
+                )
+                candidates = list(step.varbinds)
+            if step.error_indication or step.error_status not in ("noError", "0"):
+                error = str(step.error_indication or step.error_status)
+                break
+            progressed = False
+            stop = False
+            for vb in candidates:
+                if vb.exception is not None:
+                    stop = True
+                    break
+                if not str(vb.oid).startswith(prefix + "."):
+                    stop = True
+                    break
+                if varbinds and _oid_key(str(vb.oid)) <= _oid_key(str(varbinds[-1].oid)):
+                    stop = True
+                    break
+                varbinds.append(vb)
+                walk_cursor = str(vb.oid)
+                progressed = True
+                if len(varbinds) >= limit:
+                    break
+            if stop or not progressed:
+                break
+        return varbinds, error, len(varbinds) >= limit
+
     async def execute(self, req: dict[str, Any], user: str) -> dict[str, Any]:
         mode = str(req.get("mode") or "mock").lower()
         operation = str(req.get("operation") or "GET").upper()
@@ -311,6 +428,9 @@ class ProbeService:
         mock_lock = self._mock_lock if mode == "mock" else None
         if mock_lock is not None:
             await mock_lock.acquire()
+        if mode == "live":
+            await self._live_sem.acquire()
+            await self._throttle(host)
         started = time.perf_counter()
         varbinds: list[Any] = []
         error = ""
@@ -320,45 +440,30 @@ class ProbeService:
                 await self._ensure_agent(overrides, resolved_mib_id, model)
             cfg = load_config(self.config_path, overrides=overrides)
             target = cfg.targets[0]
-            session = SnmpSession(cfg, target, version, override=cred)
-            try:
-                await session.open()
-                if operation == "WALK":
-                    limit = max(1, min(int(req.get("max_results") or 50), MAX_WALK))
-                    prefix = oid.lstrip(".")
-                    # ``oid`` stays the subtree root; ``cursor`` (when present) is
-                    # the last OID of the previous page, so GETNEXT resumes exactly
-                    # where it stopped instead of treating the last OID as a new root.
-                    walk_cursor = cursor or oid
-                    for _ in range(limit):
-                        step = await session.get_next([walk_cursor])
-                        if step.error_indication or step.error_status not in ("noError", "0"):
-                            error = str(step.error_indication or step.error_status)
-                            break
-                        usable = [vb for vb in step.varbinds if vb.exception is None]
-                        if not usable:
-                            break
-                        vb = usable[0]
-                        if not str(vb.oid).startswith(prefix + "."):
-                            break
-                        varbinds.append(vb)
-                        walk_cursor = str(vb.oid)
-                    truncated = len(varbinds) >= limit
+            session = await self._acquire_session(cfg, target, version, cred)
+            if operation == "WALK":
+                limit = max(1, min(int(req.get("max_results") or 50), MAX_WALK))
+                # ``oid`` stays the subtree root; ``cursor`` (when present) is
+                # the last OID of the previous page, so the walk resumes exactly
+                # where it stopped instead of treating the last OID as a new root.
+                varbinds, error, truncated = await self._walk(
+                    session, version, oid, cursor, limit,
+                )
+            else:
+                if operation == "GET":
+                    response = await session.get([oid])
+                elif operation == "GETNEXT":
+                    response = await session.get_next([oid])
                 else:
-                    if operation == "GET":
-                        response = await session.get([oid])
-                    elif operation == "GETNEXT":
-                        response = await session.get_next([oid])
-                    else:
-                        response = await session.set([{"oid": oid, "asn1": asn1, "value": value}])
-                    varbinds = list(response.varbinds)
-                    if response.error_indication or response.error_status not in ("noError", "0"):
-                        error = str(response.error_indication or response.error_status)
-            finally:
-                await session.close()
+                    response = await session.set([{"oid": oid, "asn1": asn1, "value": value}])
+                varbinds = list(response.varbinds)
+                if response.error_indication or response.error_status not in ("noError", "0"):
+                    error = str(response.error_indication or response.error_status)
         finally:
             if mock_lock is not None:
                 mock_lock.release()
+            if mode == "live":
+                self._live_sem.release()
 
         result = {
             "ok": not error,

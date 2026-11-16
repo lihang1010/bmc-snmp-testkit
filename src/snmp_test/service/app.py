@@ -140,6 +140,7 @@ def create_app(
     app.state.library = library
     app.state.store = store
     app.state.runner = runner
+    app.state.probe = probe
     app.state.security = security_cfg
     app.state.workspace = workspace
     app.state.templates = templates
