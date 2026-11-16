@@ -397,6 +397,19 @@ class MibParser:
             else:
                 seen_subids[key] = d.name
             sp = syntax_parsed.get(d.name)
+            if sp:
+                enum_vals = list((sp.get("enum") or {}).values())
+                if len(enum_vals) == 1 and enum_vals[0] < 0:
+                    warnings.append(
+                        {
+                            "line": str(d.source_line),
+                            "code": "SENTINEL_ENUM",
+                            "message": (
+                                f"'{d.name}' declares a single negative enum value "
+                                f"({enum_vals[0]}); treated as a sentinel, not a closed domain"
+                            ),
+                        }
+                    )
             if sp and sp.get("base_type") not in {
                 "Integer32", "OCTET STRING", "DisplayString", "IpAddress", "PhysAddress",
                 "OBJECT IDENTIFIER", "SEQUENCE OF",

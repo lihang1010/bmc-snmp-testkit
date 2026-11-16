@@ -174,6 +174,25 @@ def test_upload_is_shared_between_accounts(web):
     assert client.get("/api/mibs/does-not-exist", headers=_headers(alice)).status_code == 404
 
 
+def test_stale_case_cache_is_regenerated(web):
+    """Old cases.json files must be rebuilt instead of keeping outdated assertions."""
+    client, root, _, alice, _ = web
+    rec = client.post("/api/mibs", content=MIB_BYTES, headers=_headers(alice)).json()["mib"]
+    path = root / "work" / "mibs" / rec["mib_id"] / "cases.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["meta"]["generator"]["cache_version"] = 0
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    r = client.get(f"/api/mibs/{rec['mib_id']}/cases", headers=_headers(alice))
+    assert r.status_code == 200, r.text
+
+    refreshed = json.loads(path.read_text(encoding="utf-8"))
+    assert refreshed["meta"]["generator"]["cache_version"] >= 2
+    cpu = next(c for c in refreshed["cases"] if c["name"] == "GET cpuCoreCount[2]")
+    kinds = {a["kind"] for a in cpu["expectation"]["assertions"]}
+    assert "value_in" not in kinds and "value_in_range" in kinds
+
+
 def test_readonly_job_end_to_end(web):
     client, root, _, alice, bob = web
     mib_id = client.get("/api/mibs", headers=_headers(alice)).json()["mibs"][0]["mib_id"]

@@ -105,6 +105,21 @@ def test_value_factory_domains(model):
     assert "value_in_range" in {a["kind"] for a in value_assertions(ranged)}
 
 
+def test_sentinel_enum_is_not_a_closed_domain(model):
+    # Integer32 { NA(-1) } is a vendor sentinel, not a complete enumeration.
+    node = model.node_by_name("cpuCoreCount")
+    assert node.syntax.enum == {"NA": -1}
+    assertions = value_assertions(node.syntax)
+    kinds = {a["kind"] for a in assertions}
+    assert "value_in" not in kinds
+    assert {"kind": "value_in_range", "min": -(2**31), "max": 2**31 - 1} in assertions
+    assert "enum_out_of_set" not in {v.label for v in invalid_values(node.syntax)}
+
+    # Real enumerations keep the strict closed-set assertion.
+    enum_syntax = model.node_by_name("snmptrapSeverity").syntax
+    assert {"kind": "value_in", "allowed": [1, 2, 3]} in value_assertions(enum_syntax)
+
+
 def test_trap_case_generation(tmp_path: Path, model):
     cfg = tmp_path / "trap.yaml"
     cfg.write_text(

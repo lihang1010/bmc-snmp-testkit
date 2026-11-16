@@ -127,7 +127,7 @@ def invalid_values(syntax: SyntaxSpec | None) -> list[ValueSpec]:
     if t == "Integer32":
         out.append(ValueSpec("OctetString", "not-an-integer", "wrong_type", valid=False))
         if syntax:
-            if syntax.enum:
+            if syntax.enum and not is_sentinel_enum(syntax):
                 used = set(syntax.enum.values())
                 candidate = max(used) + 1 if used else 1
                 out.append(ValueSpec("Integer32", candidate, "enum_out_of_set", valid=False))
@@ -147,6 +147,19 @@ def invalid_values(syntax: SyntaxSpec | None) -> list[ValueSpec]:
     return out
 
 
+def is_sentinel_enum(syntax: SyntaxSpec | None) -> bool:
+    """A lone negative named value (e.g. ``Integer32 { NA(-1) }``) is a sentinel.
+
+    Vendor MIBs often use it to mean "not applicable" while returning a real
+    count otherwise, so treating it as a closed enumeration yields false
+    positives on live devices.
+    """
+    if syntax is None or not syntax.enum:
+        return False
+    values = list(syntax.enum.values())
+    return len(values) == 1 and values[0] < 0
+
+
 def value_assertions(syntax: SyntaxSpec | None) -> list[dict[str, Any]]:
     """Declarative assertions used for a normal GET response."""
     assertions: list[dict[str, Any]] = [
@@ -157,11 +170,12 @@ def value_assertions(syntax: SyntaxSpec | None) -> list[dict[str, Any]]:
     if syntax is None:
         return assertions
     if syntax.is_integer:
-        if syntax.enum:
+        sentinel = is_sentinel_enum(syntax)
+        if syntax.enum and not sentinel:
             assertions.append({"kind": "value_in", "allowed": list(syntax.enum_values)})
         for lo, hi in syntax.ranges:
             assertions.append({"kind": "value_in_range", "min": lo, "max": hi})
-        if not syntax.enum and not syntax.ranges:
+        if not syntax.ranges and (not syntax.enum or sentinel):
             assertions.append({"kind": "value_in_range", "min": INT32_MIN, "max": INT32_MAX})
     # For IpAddress the SIZE constraint is expressed in raw octets, while the
     # normalised value is the dotted-quad text; the type assertion already

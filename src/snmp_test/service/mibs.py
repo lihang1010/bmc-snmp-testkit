@@ -13,7 +13,7 @@ import re
 import shutil
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,9 @@ from snmp_test.runner.safety import load_policy
 
 MIB_ID_RE = re.compile(r"^[0-9a-f]{16}$")
 MAX_MIB_BYTES = 4 * 1024 * 1024
+# Bumped whenever generated cases change shape, so cached ``cases.json`` from an
+# older release is rebuilt on next use instead of silently keeping stale assertions.
+GENERATOR_CACHE_VERSION = 2
 
 
 class MibError(ValueError):
@@ -112,7 +115,11 @@ class MibLibrary:
                     "module_name": model.module_name,
                     "root_oid": model.root_oid,
                     "uploaded_by": uploaded_by,
-                    "generator": {"versions": ["v1", "v2c", "v3"], "seed": options.seed},
+                    "generator": {
+                        "versions": ["v1", "v2c", "v3"],
+                        "seed": options.seed,
+                        "cache_version": GENERATOR_CACHE_VERSION,
+                    },
                     "trap_expectations": 0,
                 },
             ).write(folder / "cases.json")
@@ -176,4 +183,67 @@ class MibLibrary:
         return self._dir(mib_id) / "cases.json"
 
     def load_cases(self, mib_id: str) -> CaseStore:
-        return CaseStore.read(self.cases_path(mib_id))
+        path = self.cases_path(mib_id)
+        store = CaseStore.read(path)
+        if self._cache_is_current(store):
+            return store
+        with self._lock:
+            store = CaseStore.read(path)
+            if self._cache_is_current(store):
+                return store
+            return self._regenerate_cases(mib_id, store)
+
+    @staticmethod
+    def _cache_is_current(store: CaseStore) -> bool:
+        generator = store.meta.get("generator") or {}
+        return int(generator.get("cache_version") or 0) == GENERATOR_CACHE_VERSION
+
+    def _regenerate_cases(self, mib_id: str, stale: CaseStore) -> CaseStore:
+        """Rebuild a stale case repository in place (caller holds ``self._lock``)."""
+        record = self.get(mib_id)
+        mib_path = self.mib_path(mib_id)
+        model = build_model(mib_path)
+        options = GeneratorOptions(
+            versions=("v1", "v2c", "v3"),
+            policy=load_policy(self.policy_path),
+        )
+        cases = generate_cases(model, options)
+        meta = dict(stale.meta)
+        meta.update({
+            "mib_sha256": model.mib_sha256,
+            "mib_path": str(mib_path),
+            "module_name": model.module_name,
+            "root_oid": model.root_oid,
+        })
+        generator = dict(meta.get("generator") or {})
+        generator.update({
+            "versions": ["v1", "v2c", "v3"],
+            "seed": options.seed,
+            "cache_version": GENERATOR_CACHE_VERSION,
+        })
+        meta["generator"] = generator
+        store = CaseStore.from_cases(cases, meta)
+        store.write(self.cases_path(mib_id))
+
+        folder = self._dir(mib_id)
+        (folder / "model.json").write_text(model.to_json(), encoding="utf-8")
+        (folder / "parse-warnings.json").write_text(
+            json.dumps(
+                {
+                    "total": len(model.warnings),
+                    "warnings": model.warnings,
+                    "stats": model.stats,
+                    "parser": smi_info(mib_path.read_text(encoding="utf-8", errors="replace")),
+                },
+                indent=2, ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        refreshed = replace(
+            record, case_count=len(cases), warning_count=len(model.warnings),
+        )
+        (folder / "meta.json").write_text(
+            json.dumps(asdict(refreshed), indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        self._records[mib_id] = refreshed
+        return store

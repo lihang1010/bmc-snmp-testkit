@@ -61,6 +61,11 @@ def test_module_filename_mismatch_is_reported(model):
     assert any(w["code"] == "MODULE_FILENAME_MISMATCH" for w in model.warnings)
 
 
+def test_single_negative_enum_is_reported_as_sentinel(model):
+    hits = [w for w in model.warnings if w["code"] == "SENTINEL_ENUM"]
+    assert any("cpuCoreCount" in w["message"] for w in hits), hits
+
+
 def test_commented_definitions_are_excluded(model):
     for name in ("platformInfo", "meVersion", "kvmMouseSetting", "powerConf", "eepromControl"):
         assert model.node_by_name(name) is None
