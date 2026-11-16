@@ -41,10 +41,10 @@ def _result(assertions: list[dict]) -> CaseResult:
     )
 
 
-def _finish(result: CaseResult, response: SnmpResponse) -> CaseResult:
+def _finish(result: CaseResult, response: SnmpResponse, case: TestCase | None = None) -> CaseResult:
     runtime = object.__new__(Runtime)
     runtime.collector = SimpleNamespace(add_pdu=lambda **_: None)
-    runtime._finish(result, response)
+    runtime._finish(result, response, case)
     return result
 
 
@@ -75,6 +75,58 @@ def test_expected_rejection_still_passes():
     # A negative case that *expects* noSuchName must not be reclassified.
     result = _finish(_result([{"kind": "no_such"}]), _response(version="v1", error_status="noSuchName"))
     assert result.status == "passed"
+
+
+def _getnext_case(start: str) -> TestCase:
+    return TestCase(
+        case_id="TC-getnext",
+        name="GETNEXT table:x",
+        oid=start,
+        operation="GETNEXT",
+        version="v1",
+        category="normal",
+        tags=(),
+        payload={"varbinds": [{"oid": start, "asn1": "Null", "value": None}], "start_oid": start},
+        expectation={
+            "assertions": [
+                {"kind": "no_error"},
+                {"kind": "varbind_count", "min": 1},
+                {"kind": "oid_gt", "oid": start},
+                {"kind": "oid_prefix", "prefix": start},
+                {"kind": "oid_order"},
+            ]
+        },
+        module="table:x",
+    )
+
+
+def test_getnext_leaving_subtree_is_unsupported():
+    start = "1.3.6.1.4.1.52305.2.22.1.1"
+    case = _getnext_case(start)
+    result = CaseResult(
+        case_id=case.case_id, name=case.name, operation="GETNEXT", version="v1",
+        target="bmc", expectation=case.expectation,
+    )
+    response = _response(
+        version="v1", operation="GETNEXT",
+        varbinds=[Varbind(oid="1.3.6.1.4.1.52305.2.27.1.1.1", type="Integer32", value=1)],
+    )
+    assert _finish(result, response, case).status == "unsupported"
+    assert "has no instances" in result.message
+
+
+def test_getnext_backwards_successor_stays_failed():
+    start = "1.3.6.1.4.1.52305.2.22.1.1"
+    case = _getnext_case(start)
+    result = CaseResult(
+        case_id=case.case_id, name=case.name, operation="GETNEXT", version="v1",
+        target="bmc", expectation=case.expectation,
+    )
+    response = _response(
+        version="v1", operation="GETNEXT",
+        varbinds=[Varbind(oid="1.3.6.1.4.1.52305.2.22.0.1", type="Integer32", value=1)],
+    )
+    assert _finish(result, response, case).status == "failed"
 
 
 def test_other_assertion_failures_stay_failed():

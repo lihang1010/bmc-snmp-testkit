@@ -389,7 +389,7 @@ class Runtime:
             )
         else:
             raise RuntimeError(f"unsupported read operation {operation}")
-        self._finish(result, response)
+        self._finish(result, response, case)
 
     async def _execute_set(self, target: TargetConfig, case: TestCase, result: CaseResult) -> None:
         session = await self._session(target, case)
@@ -397,7 +397,7 @@ class Runtime:
         guarded_case = replace(case, payload={**case.payload, "target": target.name})
         response, trace = await self.safety.guarded_set(session, guarded_case, varbinds)
         result.logs.extend(trace)
-        self._finish(result, response)
+        self._finish(result, response, case)
         self.collector.add_pdu(
             case_id=case.case_id, target=target.name, version=case.version,
             operation="SET", response=response, note="guarded backup/set/restore",
@@ -480,7 +480,7 @@ class Runtime:
             operation=case.operation, response=None, note=json_safe({"trigger": fired, "trap": trap.to_dict() if trap else None}),
         )
 
-    def _finish(self, result: CaseResult, response: SnmpResponse) -> None:
+    def _finish(self, result: CaseResult, response: SnmpResponse, case: TestCase | None = None) -> None:
         outcome = evaluate(result_case_from_result(result), response)
         result.actual = {**response.to_dict(), "_assertions": outcome.details}
         if outcome.passed:
@@ -490,21 +490,54 @@ class Runtime:
             # A failing read is not always a product defect: the device may not
             # implement the MIB-declared OID, or may not answer at all.  Keeping
             # those outcomes separate keeps the effective pass rate meaningful.
-            result.status = shortfall_status(response) or "failed"
+            result.status = shortfall_status(response, case) or "failed"
             result.message = "; ".join(outcome.failures)
+            left = _successor_outside_subtree(response, case)
+            if result.status == "unsupported" and left:
+                start, prefix, first = left
+                result.message = (
+                    f"subtree {prefix} has no instances: GETNEXT({start}) returned {first}"
+                )
         self.collector.add_pdu(
             case_id=result.case_id, target=result.target, version=result.version,
             operation=result.operation, response=response,
         )
 
 
-def shortfall_status(response: SnmpResponse) -> str | None:
+def _successor_outside_subtree(
+    response: SnmpResponse, case: TestCase | None,
+) -> tuple[str, str, str] | None:
+    """Detect a GETNEXT successor that left the requested subtree.
+
+    An empty/unimplemented table makes GETNEXT jump to the next existing OID
+    elsewhere in the tree.  That is legal SNMP, so the strict within-subtree
+    ordering assertion must not turn it into a device defect.
+    """
+    if case is None or case.operation != "GETNEXT" or not response.varbinds:
+        return None
+    prefix = ""
+    for spec in case.expectation.get("assertions") or []:
+        if spec.get("kind") == "oid_prefix":
+            prefix = str(spec.get("prefix") or "")
+            break
+    start = str(case.payload.get("start_oid") or case.oid or "")
+    if not prefix or not start:
+        return None
+    first = str(response.varbinds[0].oid)
+    if _oid_key(first) <= _oid_key(start) or first.startswith(prefix + "."):
+        return None
+    return start, prefix, first
+
+
+def shortfall_status(response: SnmpResponse, case: TestCase | None = None) -> str | None:
     """Classify a failed response that reflects device support, not assertions."""
     if is_timeout(response.error_indication):
         return "timeout"
     if response.error_status == "noSuchName":
         return "unsupported"
     if any(v.exception in ("NoSuchObject", "NoSuchInstance") for v in response.varbinds):
+        return "unsupported"
+    if _successor_outside_subtree(response, case):
         return "unsupported"
     return None
 

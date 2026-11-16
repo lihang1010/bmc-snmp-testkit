@@ -214,10 +214,10 @@ finally:
 | `error` | 框架层异常（还原中止、代码异常） |
 | `skipped` | 设计性跳过（如 v1 不支持 GETBULK、`--dry-run`） |
 | `blocked` | 安全策略拦截，**是策略生效的证据，不是漏测** |
-| `unsupported` | MIB 声明了该 OID，但设备返回 `noSuchName` / `noSuchObject` / `noSuchInstance`，即未实现 |
+| `unsupported` | MIB 声明了该 OID，但设备返回 `noSuchName` / `noSuchObject` / `noSuchInstance`；或 GETNEXT 返回的后继 OID 已离开所请求的子树（该表/子树无实例），即未实现 |
 | `timeout` | 请求超时，设备未回应；常见于未实现的子树或网络/ACL 丢弃 |
 
-`unsupported` 与 `timeout` 只在断言失败时归类；如果用例本身就以拒绝/超时为期望（如 `auth_rejected`），仍按断言结果记为 `passed`。
+`unsupported` 与 `timeout` 只在断言失败时归类；如果用例本身就以拒绝/超时为期望（如 `auth_rejected`），仍按断言结果记为 `passed`。GETNEXT 离开子树只在「后继 OID 严格大于起点」时归类；返回更小的 OID 仍判 `failed`，因为那是真正的顺序错误。
 
 **两个通过率**
 
@@ -284,7 +284,7 @@ python -c "import json;a=json.load(open('runs/verify-a/results.json',encoding='u
 
 | 边界 | 现状 | 影响 |
 | --- | --- | --- |
-| MIB 声明 ≠ 实机实现 | GET 用例默认断言 `no_error`，设备回 `noSuchName` / `NoSuchObject` 就判 `failed` | 真实 BMC 上未实现的表/行会集中报 failed。**这不是协议缺陷**。本轮 `raidPhysicalInfoTable` 整表 4 个 OID 全 NoSuchObject 即属此类。目前**没有 OID 基线机制**去区分「预期缺失」与「真实缺陷」 |
+| MIB 声明 ≠ 实机实现 | GET 返回 `noSuchName` / `NoSuchObject` / `NoSuchInstance`、GETNEXT 后继离开子树时归为 `unsupported`；可选 `--oid-baseline` 预先 WALK 企业根，未实现的 GET 实例直接标记 | 未实现不再计 failed；但基线只覆盖 GET，GETNEXT/GETBULK 的起点仍按 MIB 声明，实机 OID 树与 MIB 不一致时顺序断言仍可能失败 |
 | trap/inform 的 live 匹配 | 关联 varbind `1.3.6.1.4.1.52305.9.1.0` 只有本地模拟 Agent 会注入 | live 模式已改为按 `version + pdu_type + trap_oid + source + 时间窗` 匹配并认领记录；`mock_event` 在 live 下自动降级为 passive。真实设备仍须自己产生通知，否则用例在 `max_latency_s` 后判 failed |
 | trap 监听器凭据来源 | 启动时注册 `targets[]` 的 v1/v2c 团体字与 v3 用户（`mock` 段仍保留给模拟 Agent） | v3 trap 需先发现发送端 engine ID：执行器在首条 v3 TRAP 前 GET `snmpEngineID.0` 并注册；不可达的 v3 目标可在 `targets[].v3.trap_engine_id` 直接指定十六进制 ID |
 | GETNEXT/GETBULK 起点 | 起点基于 MIB 声明的列 OID，未做实机 OID 树发现 | 实机 OID 树与 MIB 不一致时，顺序断言可能失败 |
@@ -373,10 +373,10 @@ GET /runs/{run_id}/report.html -> 带鉴权的静态报告
 
 ### 11.4 已验证与仍是 MVP 的部分
 
-已验证（全量 `pytest` 共 161 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
+已验证（全量 `pytest` 共 183 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
 
 仍是 MVP、生产前需替换：
 
 - 账号存单机 SQLite、任务存单机 JSONL，多实例部署需要换成共享存储与 OIDC/LDAP；
 - trap/inform 暂未通过 Web 开放；
-- `live` 只读 GET 仍需按第 8 节所述补 OID 基线，否则未实现的 MIB 表会集中报 failed（下一步实现）。
+- `live` 的 `--oid-baseline` 只覆盖 GET；GETNEXT/GETBULK 的起点仍按 MIB 声明，实机 OID 树与 MIB 不一致时顺序断言可能失败（离开子树的情况已归为 `unsupported`）。
