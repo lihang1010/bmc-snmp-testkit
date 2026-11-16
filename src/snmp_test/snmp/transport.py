@@ -113,6 +113,29 @@ def _object_types(varbinds: list[dict[str, Any]]) -> list[ObjectType]:
     return out
 
 
+def _octet_string_text(value: Any) -> str:
+    """Render an OCTET STRING as text when it is textual, else as 0x-hex.
+
+    ``prettyPrint()`` turns any string containing a newline into hex, but MIB
+    fields like firmware version / build time routinely embed ``\\n``.  Decode
+    UTF-8 ourselves, falling back to hex only for binary payloads.
+    """
+    try:
+        raw = value.asOctets()
+    except Exception:
+        try:
+            raw = bytes(value)
+        except Exception:
+            return str(value)
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return "0x" + raw.hex()
+    if any(ord(ch) < 0x20 and ch not in "\t\r\n" for ch in text):
+        return "0x" + raw.hex()
+    return text
+
+
 def _to_varbind(vb: Any) -> Varbind:
     oid = _oid_to_str(vb[0])
     value = vb[1]
@@ -129,6 +152,8 @@ def _to_varbind(vb: Any) -> Varbind:
             return Varbind(oid=oid, type=cls, value=int(value))
         except Exception:
             return Varbind(oid=oid, type=cls, value=pretty)
+    if cls == "OctetString":
+        return Varbind(oid=oid, type=cls, value=_octet_string_text(value))
     if cls in ("IpAddress", "ObjectIdentifier", "ObjectName"):
         return Varbind(oid=oid, type=cls, value=pretty)
     return Varbind(oid=oid, type=cls, value=pretty)

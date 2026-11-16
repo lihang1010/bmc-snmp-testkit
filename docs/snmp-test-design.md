@@ -183,7 +183,7 @@ case_id = "TC-" + sha256(
 - 按 `(target, version, credential-override)` 复用一个 `SnmpEngine` + `UdpTransportTarget`，避免逐用例握手与 USM 引擎发现；
 - v1/v2c 用 `CommunityData(community, mpModel=0/1)`；v3 用 `UsmUserData(user, authKey, privKey, authProtocol, privProtocol)`，协议字符串可配置；
 - 统一超时/重试；客户端构造异常（如非法值）归一化为 `clientError`，不发 PDU；
-- 响应归一化为 `SnmpResponse(error_indication, error_status, error_index, varbinds[])`，varbind 含数值 OID、ASN.1 类型名、值与异常标记。
+- 响应归一化为 `SnmpResponse(error_indication, error_status, error_index, varbinds[])`，varbind 含数值 OID、ASN.1 类型名、值与异常标记；`OCTET STRING` 先按 UTF-8 解码为文本（允许换行/制表符），仅二进制或非 UTF-8 内容保留 `0x` 十六进制形式。
 
 ### 6.2 版本差异
 
