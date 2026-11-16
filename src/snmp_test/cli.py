@@ -192,7 +192,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"[run] run_id={run_id} mode={cfg.mode} 执行={summary['total']} "
               f"通过={summary['passed']} 失败={summary['failed']} 错误={summary['error']} "
               f"跳过={summary['skipped']} 阻断={summary['blocked']} "
-              f"未实现={summary['unsupported']} 超时={summary['timeout']} "
+              f"未实现={summary['unsupported']} "
               f"通过率={summary['pass_rate']}% 有效通过率={summary['effective_pass_rate']}%")
         print(f"[run] 报告: {paths['report_html']}")
         print(f"[run] 结果: {paths['results_json']}  日志: {paths['run_log']}")
@@ -251,7 +251,7 @@ class _ReplayCollector:
     def shortfalls(self) -> list[dict[str, Any]]:
         if "shortfalls" in self._data:
             return self._data["shortfalls"]
-        return [r for r in self.results_dict() if r.get("status") in ("unsupported", "timeout")]
+        return [r for r in self.results_dict() if r.get("status") == "unsupported"]
 
 
 def cmd_report(args: argparse.Namespace) -> int:

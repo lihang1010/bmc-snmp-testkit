@@ -205,19 +205,18 @@ finally:
 
 ## 6. 报告里的数字怎么算
 
-**七种 status**
+**六种 status**
 
 | status | 含义 |
 | --- | --- |
 | `passed` | 所有断言成立 |
-| `failed` | 至少一条断言不成立（期望 vs 实际不符） |
+| `failed` | 至少一条断言不成立（期望 vs 实际不符），**包括请求超时** |
 | `error` | 框架层异常（还原中止、代码异常） |
 | `skipped` | 设计性跳过（如 v1 不支持 GETBULK、`--dry-run`） |
 | `blocked` | 安全策略拦截，**是策略生效的证据，不是漏测** |
 | `unsupported` | MIB 声明了该 OID，但设备返回 `noSuchName` / `noSuchObject` / `noSuchInstance`；或 GETNEXT 返回的后继 OID 已离开所请求的子树（该表/子树无实例），即未实现 |
-| `timeout` | 请求超时，设备未回应；常见于未实现的子树或网络/ACL 丢弃 |
 
-`unsupported` 与 `timeout` 只在断言失败时归类；如果用例本身就以拒绝/超时为期望（如 `auth_rejected`），仍按断言结果记为 `passed`。GETNEXT 离开子树只在「后继 OID 严格大于起点」时归类；返回更小的 OID 仍判 `failed`，因为那是真正的顺序错误。
+请求超时（`requestTimeout`）按 `failed` 记录，失败原因保留 indication，因此它会正常拉低通过率；如果用例本身就以超时为期望（如 `auth_rejected`），仍按断言结果记为 `passed`。旧版本报告里可能残留 `timeout` 状态，重新渲染时保持原样。GETNEXT 离开子树只在「后继 OID 严格大于起点」时归类为 `unsupported`；返回更小的 OID 仍判 `failed`，因为那是真正的顺序错误。
 
 **两个通过率**
 
@@ -226,7 +225,7 @@ pass_rate            = 100 * passed / total
 effective_pass_rate  = 100 * passed / (passed + failed + error)
 ```
 
-后者把 `skipped` / `blocked` / `unsupported` / `timeout` 从分母剔除，衡量「设备实际可测且断言真正失败」的比例。分组统计有 4 个维度：`by_version` / `by_operation` / `by_module` / `by_target`。
+后者把 `skipped` / `blocked` / `unsupported` 从分母剔除，衡量「设备实际可测且断言真正失败」的比例；超时按 `failed` 计入，不再从分母剔除。分组统计有 4 个维度：`by_version` / `by_operation` / `by_module` / `by_target`。
 
 真实设备上如果大量 OID 未实现，建议加 `--oid-baseline`（或配置 `execution.oid_baseline: true`）：执行前先按目标 WALK 企业根，基线中不存在的 GET 实例直接记 `unsupported`，不再逐条等待超时；WALK 本身失败（认证/网络）时自动退化为正常执行，不会把整批用例误判为未实现。
 
@@ -348,7 +347,9 @@ POST /api/jobs  -> work/jobs/jobs.jsonl（public_dict，无凭据）
                -> security.web 策略预检（allow_live / allowed_targets）
                -> load_config(web.yaml, overrides={目标/版本/凭据/端口/只读策略})
                -> 筛选用例：operations={GET, GETNEXT, GETBULK}, categories={normal},
-                  exclude_tags={auth,flood,negative,guarded,blocked}, limit
+                  exclude_tags={auth,flood,negative,guarded,blocked}
+               -> 在确有匹配用例的操作间轮转取样，limit 为硬上限
+                  （v1 没有 normal GETBULK 用例，不会占用份额）
                -> run_batch(..., security=SecurityPolicy(readonly_only=True))
                -> runs/web-<job_id>/{report.html, results.json, pdus.jsonl, ...}
 GET /api/jobs/{id}           -> 状态与通过率
@@ -373,7 +374,7 @@ GET /runs/{run_id}/report.html -> 带鉴权的静态报告
 
 ### 11.4 已验证与仍是 MVP 的部分
 
-已验证（全量 `pytest` 共 183 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
+已验证（全量 `pytest` 共 185 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
 
 仍是 MVP、生产前需替换：
 

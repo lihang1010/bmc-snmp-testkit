@@ -206,7 +206,7 @@ def test_readonly_job_end_to_end(web):
     job_id = r.json()["job"]["job_id"]
     job = _wait_done(client, job_id, alice)
     assert job["status"] == "done", job["message"]
-    assert 4 <= job["case_count"] <= 6, job["case_count"]
+    assert job["case_count"] == 6, job["case_count"]
     assert job["summary"]["failed"] == 0 and job["summary"]["error"] == 0
     assert job["summary"]["effective_pass_rate"] == 100.0
 

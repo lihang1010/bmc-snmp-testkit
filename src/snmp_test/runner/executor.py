@@ -17,7 +17,6 @@ from snmp_test.report.collector import ResultCollector
 from snmp_test.runner.assertions import evaluate
 from snmp_test.runner.safety import SafetyAbort, SafetyGateway, load_policy
 from snmp_test.security import SecurityPolicy
-from snmp_test.snmp.errors import is_timeout
 from snmp_test.snmp.mock_agent import MockAgent
 from snmp_test.snmp.trap_listener import TrapListener, engine_id_hex
 from snmp_test.snmp.transport import TransportPool
@@ -162,7 +161,7 @@ class Runtime:
         self._progress_done += 1
         if result.status == "passed":
             self._progress_passed += 1
-        elif result.status in ("failed", "error", "timeout", "unsupported"):
+        elif result.status in ("failed", "error", "unsupported"):
             self._progress_failed += 1
         cb(self._progress_done, self._progress_total, self._progress_passed, self._progress_failed)
 
@@ -530,9 +529,11 @@ def _successor_outside_subtree(
 
 
 def shortfall_status(response: SnmpResponse, case: TestCase | None = None) -> str | None:
-    """Classify a failed response that reflects device support, not assertions."""
-    if is_timeout(response.error_indication):
-        return "timeout"
+    """Classify a failed response that reflects device support, not assertions.
+
+    Timeouts are deliberately *not* shortfalls: an unanswered request is a
+    failed case, so it must lower the pass rate.
+    """
     if response.error_status == "noSuchName":
         return "unsupported"
     if any(v.exception in ("NoSuchObject", "NoSuchInstance") for v in response.varbinds):

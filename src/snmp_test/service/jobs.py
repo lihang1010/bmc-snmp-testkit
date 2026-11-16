@@ -406,27 +406,39 @@ class JobRunner:
 
         cfg, model = self._build_config(job, slot)
         # Read-only operation set: GET / GETNEXT / GETBULK (the two SNMP walk
-        # primitives).  All three are zero-risk read operations.  We sample each
-        # operation up to an even share of the limit so walk cases are not
-        # crowded out when a MIB happens to have far more GET cases than walk
-        # cases.  The overall limit is still enforced as a hard ceiling.
+        # primitives).  All three are zero-risk read operations.  Round-robin
+        # across operations that actually have matching cases keeps walks from
+        # being crowded out by GET, while still honouring the requested limit
+        # exactly (v1 has no normal GETBULK cases, so it must not consume a share).
         read_ops = ("GET", "GETNEXT", "GETBULK")
         case_store = self.library.load_cases(job.mib_id)
-        per_op = (job.limit // len(read_ops)) if job.limit else 0
-        if per_op < 1 and job.limit:
-            per_op = 1
-        cases: list = []
-        for op in read_ops:
-            cases.extend(case_store.select(CaseFilter(
+        pools = {
+            op: case_store.select(CaseFilter(
                 operations={op},
                 categories={"normal"},
                 versions={job.version},
                 modules=set(job.modules),
                 exclude_tags={"auth", "flood", "negative", "guarded", "blocked"},
-                limit=per_op,
-            )))
+            ))
+            for op in read_ops
+        }
+        ops = [op for op in read_ops if pools[op]]
+        cases: list = []
         if job.limit:
-            cases = cases[: job.limit]
+            taken = {op: 0 for op in ops}
+            while len(cases) < job.limit:
+                progressed = False
+                for op in ops:
+                    if taken[op] < len(pools[op]):
+                        cases.append(pools[op][taken[op]])
+                        taken[op] += 1
+                        progressed = True
+                        if len(cases) >= job.limit:
+                            break
+                if not progressed:
+                    break
+        else:
+            cases = [case for op in ops for case in pools[op]]
         if not cases:
             raise ValueError("no read-only GET/GETNEXT/GETBULK cases matched the requested filters")
         job.case_count = len(cases)
@@ -473,7 +485,7 @@ class JobRunner:
                 job.status = "done"
                 job.message = (
                     f"{summary['passed']}/{summary['total']} passed, "
-                    f"unsupported {summary['unsupported']}, timeout {summary['timeout']}, "
+                    f"unsupported {summary['unsupported']}, "
                     f"effective {summary['effective_pass_rate']}%"
                 )
         finally:

@@ -200,7 +200,7 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 
 - Web 层默认不设 live 白名单（`security.web.allowed_targets: []`），需要收紧时在 `config/web.yaml` 配置；CLI 的 `--allow-live` 与 `Runtime` 的 `SecurityPolicy.enforce` 闸口保持不变，只约束命令行调用。
 - 团体字 / v3 密钥只在任务提交或即时探测时经内存注入，不写入任何配置或任务文件；日志、报告、快照全部脱敏。
-- 任务队列默认 2 个 worker 并发（`SNMP_TEST_WEB_WORKERS`，上限 4），按目标互斥：同一台 live BMC 同时只跑一个批次，后到的任务标记「等待中」并自动排队。交互探测默认 4 个 live 请求并发、不限速，可在 `config/web.yaml` 的 `probe` 段调整 `concurrency` / `rate_limit_ms`，会话缓存参数见 `config/web.example.yaml`。CLI / pytest 的模拟 Agent 端口 `11811 + slot*10`、trap 监听 `11812 + slot*10`（与 CLI `11611/11612`、测试 `11711/11712` 错开）。
+- 任务队列默认 2 个 worker 并发（`SNMP_TEST_WEB_WORKERS`，上限 4），按目标互斥：同一台 live BMC 同时只跑一个批次，后到的任务标记「等待中」并自动排队。提交时的用例数 `limit` 是硬上限：在 GET / GETNEXT / GETBULK 中确有匹配用例的操作间轮转取样，v1 没有 normal GETBULK 用例时不会再占用份额。交互探测默认 4 个 live 请求并发、不限速，可在 `config/web.yaml` 的 `probe` 段调整 `concurrency` / `rate_limit_ms`，会话缓存参数见 `config/web.example.yaml`。CLI / pytest 的模拟 Agent 端口 `11811 + slot*10`、trap 监听 `11812 + slot*10`（与 CLI `11611/11612`、测试 `11711/11712` 错开）。
 
 **主要接口**
 

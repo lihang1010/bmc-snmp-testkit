@@ -99,7 +99,8 @@ class ResultCollector:
     def _rate_group(items: list[CaseResult]) -> dict[str, Any]:
         total = len(items)
         counts = {status: sum(1 for r in items if r.status == status) for status in TERMINAL}
-        executed = counts["passed"] + counts["failed"] + counts["error"]
+        # Timeouts count against the pass rate: an unanswered request is a failure.
+        executed = counts["passed"] + counts["failed"] + counts["error"] + counts["timeout"]
         return {
             "total": total,
             **counts,
@@ -131,10 +132,10 @@ class ResultCollector:
         }
 
     def failures(self) -> list[dict[str, Any]]:
-        return [r.to_dict() for r in self.results if r.status in ("failed", "error", "blocked")]
+        return [r.to_dict() for r in self.results if r.status in ("failed", "error", "blocked", "timeout")]
 
     def shortfalls(self) -> list[dict[str, Any]]:
-        return [r.to_dict() for r in self.results if r.status in ("unsupported", "timeout")]
+        return [r.to_dict() for r in self.results if r.status == "unsupported"]
 
     def results_dict(self) -> list[dict[str, Any]]:
         return [r.to_dict() for r in self.results]

@@ -49,8 +49,8 @@ def write_junit_xml(collector: ResultCollector) -> Path:
     for result in collector.results_dict():
         groups.setdefault(result["operation"], []).append(result)
     for operation, items in sorted(groups.items()):
-        failures = sum(1 for r in items if r["status"] in ("failed", "error"))
-        skipped = sum(1 for r in items if r["status"] in ("skipped", "blocked", "unsupported", "timeout"))
+        failures = sum(1 for r in items if r["status"] in ("failed", "error", "timeout"))
+        skipped = sum(1 for r in items if r["status"] in ("skipped", "blocked", "unsupported"))
         suite = ET.SubElement(
             suites,
             "testsuite",
@@ -73,10 +73,10 @@ def write_junit_xml(collector: ResultCollector) -> Path:
                     "time": str(round(r["duration_ms"] / 1000.0, 4)),
                 },
             )
-            if r["status"] in ("failed", "error"):
+            if r["status"] in ("failed", "error", "timeout"):
                 failure = ET.SubElement(case, "failure", {"message": r["message"][:500]})
                 failure.text = json.dumps(r.get("actual", {}), ensure_ascii=False, default=str)[:4000]
-            elif r["status"] in ("skipped", "blocked", "unsupported", "timeout"):
+            elif r["status"] in ("skipped", "blocked", "unsupported"):
                 ET.SubElement(case, "skipped", {"message": r["message"][:500]})
     ET.ElementTree(suites).write(path, encoding="utf-8", xml_declaration=True)
     return path

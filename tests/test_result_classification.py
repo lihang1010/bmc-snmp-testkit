@@ -1,4 +1,4 @@
-"""Device-side shortfalls (unsupported / timeout) must not look like defects."""
+"""Device-side unsupported results must not look like defects; timeouts are failures."""
 
 from __future__ import annotations
 
@@ -48,9 +48,9 @@ def _finish(result: CaseResult, response: SnmpResponse, case: TestCase | None = 
     return result
 
 
-def test_timeout_is_classified_not_failed():
+def test_timeout_is_a_failure():
     result = _finish(_result([{"kind": "no_error"}]), _response(error_indication="requestTimeout"))
-    assert result.status == "timeout"
+    assert result.status == "failed"
     assert "requestTimeout" in result.message
 
 
@@ -135,7 +135,7 @@ def test_other_assertion_failures_stay_failed():
     assert result.status == "failed"
 
 
-def test_summary_and_junit_treat_shortfalls_as_not_run(tmp_path):
+def test_summary_and_junit_count_timeouts_as_failures(tmp_path):
     cfg = load_config(ROOT / "config" / "config.example.yaml")
     collector = ResultCollector(cfg, "classify-a", tmp_path / "run")
     statuses = ["passed"] * 6 + ["failed"] + ["timeout"] * 2 + ["unsupported"] + ["skipped"] + ["blocked"]
@@ -148,12 +148,14 @@ def test_summary_and_junit_treat_shortfalls_as_not_run(tmp_path):
     assert overall["failed"] == 1
     assert overall["timeout"] == 2
     assert overall["unsupported"] == 1
-    assert overall["effective_pass_rate"] == round(100.0 * 6 / 7, 2)
-    assert len(collector.failures()) == 2  # failed + blocked
-    assert len(collector.shortfalls()) == 3
+    # executed = passed + failed + error + timeout = 6 + 1 + 2
+    assert overall["effective_pass_rate"] == round(100.0 * 6 / 9, 2)
+    assert len(collector.failures()) == 4  # failed + blocked + 2 timeouts
+    assert len(collector.shortfalls()) == 1  # unsupported only
 
     junit = write_junit_xml(collector).read_text(encoding="utf-8")
-    assert junit.count("<skipped") == 5  # 2 timeout + 1 unsupported + skipped + blocked
+    assert junit.count("<failure") == 3  # failed + 2 timeouts
+    assert junit.count("<skipped") == 3  # unsupported + skipped + blocked
 
     html = write_html_report(
         collector,
@@ -166,7 +168,8 @@ def test_summary_and_junit_treat_shortfalls_as_not_run(tmp_path):
             "extra": {},
         },
     ).read_text(encoding="utf-8")
-    assert "设备未实现 / 超时用例（3）" in html
+    assert "设备未实现用例（1）" in html
+    assert "失败用例详情（4）" in html
     assert '<option value="timeout">timeout</option>' in html
 
     collector.close()

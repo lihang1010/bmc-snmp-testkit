@@ -299,7 +299,7 @@ case_id = "TC-" + sha256(
 | `config-snapshot.yaml` | 脱敏配置快照 |
 | `mib.sha256` / `case-manifest.json` | 输入哈希、解析统计、用例 ID 清单 |
 
-`effective_pass_rate = passed / (passed + failed + error)`，把设计性 skip、安全阻断以及设备侧的 `unsupported` / `timeout` 从分母剔除；`pass_rate` 则按总数计算。报告同时单独列出未实现与超时用例，避免把 MIB 已声明但设备未实现的 OID 记成断言失败。
+`effective_pass_rate = passed / (passed + failed + error)`，把设计性 skip、安全阻断以及设备侧的 `unsupported` 从分母剔除；请求超时按 `failed` 计入。`pass_rate` 则按总数计算。报告同时单独列出未实现用例，避免把 MIB 已声明但设备未实现的 OID 记成断言失败。
 
 可重复性由四要素保证：稳定 `case_id`、MIB SHA-256、脱敏配置快照、隔离的 `runs/<run_id>/` 目录。`snmp-test report <run_dir>` 可从历史 `results.json` 重新渲染报告。
 

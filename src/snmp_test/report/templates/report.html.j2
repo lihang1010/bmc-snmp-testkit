@@ -129,9 +129,9 @@
     {% if failures|length > 200 %}<p class="sub">仅显示前 200 条，完整数据见 results.json。</p>{% endif %}
   {% else %}<p class="ok">无失败用例。</p>{% endif %}
 
-  <h2>设备未实现 / 超时用例（{{ shortfalls|length }}）</h2>
+  <h2>设备未实现用例（{{ shortfalls|length }}）</h2>
   {% if shortfalls %}
-    <p class="sub">这些用例未通过断言，但响应表明是设备未实现该 OID（noSuchName/noSuchObject/noSuchInstance）或未响应（timeout），不计入有效通过率分母。</p>
+    <p class="sub">这些用例未通过断言，但响应表明是设备未实现该 OID（noSuchName/noSuchObject/noSuchInstance），不计入有效通过率分母。请求超时按失败计入。</p>
     <div class="scroll"><table>
       <thead><tr><th>用例 ID</th><th>名称</th><th>操作</th><th>版本</th><th>目标</th><th>状态</th><th>原因</th></tr></thead>
       <tbody>
@@ -142,7 +142,7 @@
       </tbody>
     </table></div>
     {% if shortfalls|length > 200 %}<p class="sub">仅显示前 200 条，完整数据见 results.json。</p>{% endif %}
-  {% else %}<p class="ok">无未实现或超时用例。</p>{% endif %}
+  {% else %}<p class="ok">无未实现用例。</p>{% endif %}
 
   <h2>全部用例（{{ results|length }}）</h2>
   <div class="controls">
@@ -159,7 +159,7 @@
         <td><code>{{ r.case_id }}</code></td>
         <td>{{ r.name }}<br><span class="sub">{{ r.module }}</span></td>
         <td>{{ r.operation }}</td><td>{{ r.version }}</td><td>{{ r.target }}</td>
-        <td class="status {{ 'ok' if r.status == 'passed' else 'fail' if r.status in ('failed','error') else 'warn' if r.status == 'timeout' else 'skip' }}">{{ r.status }}</td>
+        <td class="status {{ 'ok' if r.status == 'passed' else 'fail' if r.status in ('failed','error','timeout') else 'skip' }}">{{ r.status }}</td>
         <td>{{ r.duration_ms }}</td>
         <td><details><summary class="link">查看</summary>{{ render_response(r.actual) }}</details></td>
         <td>{{ r.message }}</td>
