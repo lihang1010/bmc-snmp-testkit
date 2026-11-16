@@ -30,6 +30,7 @@
   }
 
   var treeData = null;          // {nodes, tables, module_name, root_oid, total}
+  var currentMibId = '';        // mib_id of the tree currently shown
   var byName = {};              // name -> node
   var childrenMap = {};         // parent_name -> [nodes], sorted by sub_id
   var roots = [];               // nodes whose parent is outside the model
@@ -62,6 +63,7 @@
           }).join('')
         : '<option value="">暂无 MIB，请先在控制台上传</option>';
       if(mibs.length) return loadTree(mibs[0].mib_id);
+      currentMibId = '';
       $('treeInfo').textContent = '未上传 MIB';
       $('tree').innerHTML = '<div class="tree-empty">尚未上传 MIB，请先在控制台上传并解析</div>';
       $('statusPill').textContent = '未上传 MIB';
@@ -69,6 +71,7 @@
   }
 
   function loadTree(mibId){
+    currentMibId = mibId;
     $('treeInfo').textContent = '加载节点树…';
     $('tree').innerHTML = '<div class="tree-empty">加载中…</div>';
     return api('/api/mibs/'+mibId+'/tree').then(function(d){
@@ -308,6 +311,7 @@
       version: version, credential: cred, operation: operation, oid: oid,
       max_results: parseInt($('maxResults').value || '200', 10)
     };
+    if(currentMibId) body.mib_id = currentMibId;
     if(operation === 'SET'){
       body.value = (extra && extra.value) || '';
       body.asn1 = (extra && extra.asn1) || 'OctetString';

@@ -74,6 +74,7 @@ class LoginRequest(BaseModel):
 
 
 class ProbeRequest(BaseModel):
+    mib_id: str | None = None
     mode: str = "mock"
     target_host: str = "127.0.0.1"
     target_port: int = 161

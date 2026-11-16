@@ -38,6 +38,8 @@
 | `NOTIFICATION-TYPE` / `TRAP-TYPE` | **0** |
 | trap 配置 | `snmptrapPoliciesTable`（`alarmSetting 1`，16 列）、`emailalarmPoliciesTable`（`alarmSetting 2`）、`eventLogsTable`（`serverAssetInfo 11`，7 列） |
 
+根 OID 不写死厂商号：优先使用本文件定义的 `ttyRoot`，否则取本文件解析出的最浅节点（通常是 `MODULE-IDENTITY`）。因此 `TEST-IF-MIB` 这类标准 MIB 会得到自己的 `1.3.6.1.2.1.999`，而不是回退到某个企业号。
+
 ### 2.2 为什么节点树仍由自研解析器生成
 
 该 MIB 不是严格 SMIv2：

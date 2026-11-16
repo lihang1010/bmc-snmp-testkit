@@ -174,7 +174,7 @@ def build_model(path: str | Path, root_oid: str | None = None) -> MibModel:
         kind: sum(1 for n in nodes if n.kind == kind)
         for kind in ("group", "table", "entry", "column", "scalar")
     }
-    stats["root_oid"] = root_oid or oid_of.get("ttyRoot", "1.3.6.1.4.1.52305")
+    stats["root_oid"] = _derive_root_oid(root_oid, oid_of, resolved)
 
     model = MibModel(
         module_name=parsed.module_name,
@@ -194,3 +194,28 @@ def load_model(path: str | Path) -> MibModel:
     import json
 
     return MibModel.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def _derive_root_oid(
+    explicit: str | None,
+    oid_of: dict[str, str],
+    resolved: dict[str, Any],
+) -> str:
+    """Pick the MIB's own subtree root without assuming a vendor enterprise number.
+
+    Vendor MIBs commonly declare ``ttyRoot ::= { enterprises 52305 }``; standard
+    MIBs declare a module identity such as ``testIfMIB ::= { mib-2 999 }``.
+    Using the shallowest node defined *by this file* finds either form while
+    ignoring imported parent symbols.
+    """
+    if explicit:
+        return explicit
+    if "ttyRoot" in resolved:
+        return oid_of["ttyRoot"]
+    candidates = [
+        (len(oid_of[name].split(".")), resolved[name].source_line, oid_of[name])
+        for name in resolved
+    ]
+    if candidates:
+        return min(candidates)[2]
+    return "1.3.6.1"

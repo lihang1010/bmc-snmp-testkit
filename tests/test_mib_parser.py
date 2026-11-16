@@ -152,6 +152,12 @@ def test_model_json_round_trip(model):
     assert restored.node_by_name("authPort").syntax.ranges == ((1, 65535),)
 
 
+def test_standard_mib_derives_its_own_root():
+    model = build_model(Path(__file__).parent / "fixtures" / "TEST-IF-MIB.mib")
+    assert model.root_oid == "1.3.6.1.2.1.999"
+    assert model.node_by_name("testIfMIB").kind == "group"
+
+
 def test_parser_is_deterministic():
     p = MibParser(MIB)
     a, b = p.parse(), p.parse()

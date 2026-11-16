@@ -27,7 +27,7 @@ from snmp_test.model.types import MibModel
 from snmp_test.runner.safety import classify_node, load_policy
 from snmp_test.snmp.mock_agent import MockAgent
 from snmp_test.snmp.transport import SnmpSession
-from snmp_test.service.mibs import MibLibrary
+from snmp_test.service.mibs import MibError, MibLibrary
 from snmp_test.service.web_policy import WebPolicy
 
 PROBE_MOCK_PORT = 11911
@@ -96,7 +96,11 @@ class ProbeService:
         self.audit = ProbeAudit(self.root)
         self.policy = WebPolicy.from_security(web_security)
         self._agent: MockAgent | None = None
+        self._agent_mib_id: str | None = None
         self._agent_lock = asyncio.Lock()
+        # Mock probes share one UDP port, so switching MIBs must not restart the
+        # agent while another mock request is still using it.
+        self._mock_lock = asyncio.Lock()
 
     # ------------------------------------------------------------- policy
     def capabilities(self) -> dict[str, Any]:
@@ -125,6 +129,7 @@ class ProbeService:
             "mode": str(req.get("mode") or "mock"),
             "target": str(req.get("target_host") or ""),
             "version": str(req.get("version") or ""),
+            "mib_id": str(req.get("mib_id") or "") or None,
             "operation": str(req.get("operation") or ""),
             "oid": str(req.get("oid") or ""),
             "ok": False,
@@ -156,21 +161,34 @@ class ProbeService:
                 self._agent = None
 
     # ------------------------------------------------------------- config
-    def _model_and_mib(self) -> tuple[MibModel, Path]:
+    def _model_and_mib(self, mib_id: str | None = None) -> tuple[MibModel, Path, str]:
         records = self.library.list() if self.library else []
-        if records:
-            model_path = self.library.model_path(records[0].mib_id)
-            mib_path = self.library.mib_path(records[0].mib_id)
+        record = None
+        if mib_id:
+            if self.library is None:
+                raise ProbeError("当前服务未启用 MIB 库")
+            try:
+                record = self.library.get(mib_id)
+            except MibError as exc:
+                raise ProbeError("所选 MIB 不存在或已被删除，请刷新后重试") from exc
+        elif records:
+            record = records[0]
+        if record is not None:
+            model_path = self.library.model_path(record.mib_id)
+            mib_path = self.library.mib_path(record.mib_id)
+            resolved_id = record.mib_id
         else:
             model_path = self.root / "cases" / "generated" / "model.json"
             mib_path = self.root / "TTY-T1ZDG-v1.0_20261026.mib"
+            resolved_id = ""
         if model_path.is_file():
-            return MibModel.from_dict(json.loads(model_path.read_text(encoding="utf-8"))), mib_path
+            model = MibModel.from_dict(json.loads(model_path.read_text(encoding="utf-8")))
+            return model, mib_path, resolved_id
         return MibModel.from_dict({
             "module_name": "probe", "mib_path": str(mib_path), "mib_sha256": "",
             "root_oid": "1.3.6.1", "nodes": [], "tables": [],
             "sequence_types": [], "stats": {}, "warnings": [],
-        }), mib_path
+        }), mib_path, resolved_id
 
     def _overrides(self, req: dict[str, Any], mib_path: Path) -> tuple[dict[str, Any], dict[str, Any], str]:
         mode = str(req.get("mode") or "mock").lower()
@@ -218,17 +236,21 @@ class ProbeService:
         }
         return overrides, cred, version
 
-    async def _ensure_agent(self, overrides: dict[str, Any]) -> None:
+    async def _ensure_agent(self, overrides: dict[str, Any], mib_id: str, model: MibModel) -> None:
         async with self._agent_lock:
-            if self._agent is not None:
+            if self._agent is not None and self._agent_mib_id == mib_id:
                 return
-            model, _ = self._model_and_mib()
+            if self._agent is not None:
+                await self._agent.stop()
+                self._agent = None
+                self._agent_mib_id = None
             agent_overrides = dict(overrides)
             agent_overrides["mode"] = "mock"
             cfg = load_config(self.config_path, overrides=agent_overrides)
             agent = MockAgent(model, cfg)
             await agent.start()
             self._agent = agent
+            self._agent_mib_id = mib_id
 
     # ------------------------------------------------------------- execute
     async def execute(self, req: dict[str, Any], user: str) -> dict[str, Any]:
@@ -274,7 +296,7 @@ class ProbeService:
                 except (TypeError, ValueError) as exc:
                     raise ProbeError("Integer32 需要整数值") from exc
 
-        model, mib_path = self._model_and_mib()
+        model, mib_path, resolved_mib_id = self._model_and_mib(str(req.get("mib_id") or "").strip() or None)
         if operation == "SET" and mode == "live" and self.policy.hard_block_enabled:
             node = self._node_for_oid(model, oid)
             if node is not None:
@@ -286,51 +308,57 @@ class ProbeService:
                     self._deny(req, user, msg)
                     raise ProbeError(msg)
         overrides, cred, version = self._overrides(req, mib_path)
-        if mode == "mock":
-            await self._ensure_agent(overrides)
-        cfg = load_config(self.config_path, overrides=overrides)
-        target = cfg.targets[0]
-        session = SnmpSession(cfg, target, version, override=cred)
-
+        mock_lock = self._mock_lock if mode == "mock" else None
+        if mock_lock is not None:
+            await mock_lock.acquire()
         started = time.perf_counter()
         varbinds: list[Any] = []
         error = ""
         truncated = False
         try:
-            await session.open()
-            if operation == "WALK":
-                limit = max(1, min(int(req.get("max_results") or 50), MAX_WALK))
-                prefix = oid.lstrip(".")
-                # ``oid`` stays the subtree root; ``cursor`` (when present) is
-                # the last OID of the previous page, so GETNEXT resumes exactly
-                # where it stopped instead of treating the last OID as a new root.
-                walk_cursor = cursor or oid
-                for _ in range(limit):
-                    step = await session.get_next([walk_cursor])
-                    if step.error_indication or step.error_status not in ("noError", "0"):
-                        error = str(step.error_indication or step.error_status)
-                        break
-                    usable = [vb for vb in step.varbinds if vb.exception is None]
-                    if not usable:
-                        break
-                    vb = usable[0]
-                    if not str(vb.oid).startswith(prefix + "."):
-                        break
-                    varbinds.append(vb)
-                    walk_cursor = str(vb.oid)
-                truncated = len(varbinds) >= limit
-            else:
-                if operation == "GET":
-                    response = await session.get([oid])
-                elif operation == "GETNEXT":
-                    response = await session.get_next([oid])
+            if mode == "mock":
+                await self._ensure_agent(overrides, resolved_mib_id, model)
+            cfg = load_config(self.config_path, overrides=overrides)
+            target = cfg.targets[0]
+            session = SnmpSession(cfg, target, version, override=cred)
+            try:
+                await session.open()
+                if operation == "WALK":
+                    limit = max(1, min(int(req.get("max_results") or 50), MAX_WALK))
+                    prefix = oid.lstrip(".")
+                    # ``oid`` stays the subtree root; ``cursor`` (when present) is
+                    # the last OID of the previous page, so GETNEXT resumes exactly
+                    # where it stopped instead of treating the last OID as a new root.
+                    walk_cursor = cursor or oid
+                    for _ in range(limit):
+                        step = await session.get_next([walk_cursor])
+                        if step.error_indication or step.error_status not in ("noError", "0"):
+                            error = str(step.error_indication or step.error_status)
+                            break
+                        usable = [vb for vb in step.varbinds if vb.exception is None]
+                        if not usable:
+                            break
+                        vb = usable[0]
+                        if not str(vb.oid).startswith(prefix + "."):
+                            break
+                        varbinds.append(vb)
+                        walk_cursor = str(vb.oid)
+                    truncated = len(varbinds) >= limit
                 else:
-                    response = await session.set([{"oid": oid, "asn1": asn1, "value": value}])
-                varbinds = list(response.varbinds)
-                if response.error_indication or response.error_status not in ("noError", "0"):
-                    error = str(response.error_indication or response.error_status)
+                    if operation == "GET":
+                        response = await session.get([oid])
+                    elif operation == "GETNEXT":
+                        response = await session.get_next([oid])
+                    else:
+                        response = await session.set([{"oid": oid, "asn1": asn1, "value": value}])
+                    varbinds = list(response.varbinds)
+                    if response.error_indication or response.error_status not in ("noError", "0"):
+                        error = str(response.error_indication or response.error_status)
+            finally:
+                await session.close()
         finally:
-            await session.close()
+            if mock_lock is not None:
+                mock_lock.release()
 
         result = {
             "ok": not error,
@@ -338,6 +366,7 @@ class ProbeService:
             "oid": oid,
             "mode": mode,
             "version": version,
+            "mib_id": resolved_mib_id or None,
             "target": f"127.0.0.1:{self.mock_port}" if mode == "mock" else f"{host}:{req.get('target_port') or 161}",
             "user": user,
             "error": error or None,
@@ -352,6 +381,7 @@ class ProbeService:
             "mode": mode,
             "target": result["target"],
             "version": version,
+            "mib_id": resolved_mib_id or None,
             "operation": operation,
             "oid": oid,
             "cursor": cursor or None,

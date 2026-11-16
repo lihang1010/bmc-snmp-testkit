@@ -479,7 +479,7 @@ def test_snmp_probe(web):
         "/api/snmp/probe", headers=_headers(alice),
         json={**base, "operation": "WALK", "oid": "1.3.6.1.2.1.1", "max_results": 8},
     ).json()
-    assert walk["ok"] and walk["count"] >= 3
+    assert walk["ok"] and walk["count"] >= 3, walk
 
     written = client.post(
         "/api/snmp/probe", headers=_headers(alice),
@@ -510,6 +510,43 @@ def test_snmp_probe(web):
         "/api/snmp/audit?operation=SET", headers=_headers(alice),
     ).json()["entries"]
     assert filtered and all(e["operation"] == "SET" for e in filtered)
+
+
+def test_probe_uses_selected_mib(web):
+    """The probe must serve the MIB selected in the browser, not the latest upload."""
+    client, _, _, alice, _ = web
+    tty = client.post(
+        "/api/mibs", content=MIB_BYTES, headers=_headers(alice),
+    ).json()["mib"]["mib_id"]
+    standard = client.post(
+        "/api/mibs", content=STANDARD_MIB,
+        headers={**_headers(alice), "X-MIB-Filename": "TEST-IF-MIB.mib"},
+    ).json()["mib"]["mib_id"]
+
+    base = {"mode": "mock", "version": "v1"}
+    standard_get = {
+        **base, "mib_id": standard, "operation": "GET",
+        "oid": "1.3.6.1.2.1.999.1.1.1.1.1",
+    }
+    got = client.post("/api/snmp/probe", headers=_headers(alice), json=standard_get).json()
+    assert got["ok"], got
+    assert got["mib_id"] == standard
+    assert got["varbinds"][0]["oid"] == standard_get["oid"]
+
+    # Switching back must restart the mock agent on the other model.
+    tty_get = {
+        **base, "mib_id": tty, "operation": "GET", "oid": "1.3.6.1.4.1.52305.2.7.1.0",
+    }
+    got = client.post("/api/snmp/probe", headers=_headers(alice), json=tty_get).json()
+    assert got["ok"], got
+    assert got["mib_id"] == tty
+
+    missing = client.post(
+        "/api/snmp/probe", headers=_headers(alice),
+        json={**base, "mib_id": "deadbeefdeadbeef", "operation": "GET",
+              "oid": standard_get["oid"]},
+    )
+    assert missing.status_code == 400 and "不存在" in missing.json()["detail"]
 
 
 def test_probe_walk_cursor_pagination(web):
@@ -604,6 +641,7 @@ def test_standard_mib_import_and_warnings(web):
     assert by_name["testIfIndex"]["kind"] == "column"
     assert by_name["testIfIndex"]["table_name"] == "testIfTable"
     assert by_name["testIfIndex"]["oid"] == "1.3.6.1.2.1.999.1.1.1.1"
+    assert tree["root_oid"] == "1.3.6.1.2.1.999"
     # imported textual convention normalised to a base type; enum preserved
     assert by_name["testIfPhys"]["syntax"]["base_type"] == "Integer32"
     assert by_name["testIfOperStatus"]["syntax"]["enum"] == {
