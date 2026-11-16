@@ -128,6 +128,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     cfg = load_config(args.config)
     if args.mode:
         cfg.raw["mode"] = args.mode
+    if args.oid_baseline:
+        cfg.raw.setdefault("execution", {})["oid_baseline"] = True
     errors = cfg.validate()
     if errors:
         print("配置校验失败:", file=sys.stderr)
@@ -190,6 +192,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"[run] run_id={run_id} mode={cfg.mode} 执行={summary['total']} "
               f"通过={summary['passed']} 失败={summary['failed']} 错误={summary['error']} "
               f"跳过={summary['skipped']} 阻断={summary['blocked']} "
+              f"未实现={summary['unsupported']} 超时={summary['timeout']} "
               f"通过率={summary['pass_rate']}% 有效通过率={summary['effective_pass_rate']}%")
         print(f"[run] 报告: {paths['report_html']}")
         print(f"[run] 结果: {paths['results_json']}  日志: {paths['run_log']}")
@@ -245,6 +248,11 @@ class _ReplayCollector:
     def failures(self) -> list[dict[str, Any]]:
         return self._data.get("failures", [])
 
+    def shortfalls(self) -> list[dict[str, Any]]:
+        if "shortfalls" in self._data:
+            return self._data["shortfalls"]
+        return [r for r in self.results_dict() if r.get("status") in ("unsupported", "timeout")]
+
 
 def cmd_report(args: argparse.Namespace) -> int:
     cfg = load_config(args.config)
@@ -271,7 +279,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     preserved = {
         key: value
         for key, value in data.items()
-        if key not in ("schema", "run_id", "summary", "results", "failures")
+        if key not in ("schema", "run_id", "summary", "results", "failures", "shortfalls")
     }
     json_path = writers.write_results_json(collector, {**preserved, "regenerated": True})
     junit = writers.write_junit_xml(collector)
@@ -319,6 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--allow-live", action="store_true", help="显式确认连接真实设备")
     r.add_argument("--allow-guarded", action="store_true", help="显式放行白名单内的高危 SET（危险）")
     r.add_argument("--no-set", action="store_true", help="本次运行完全禁用 SET")
+    r.add_argument("--oid-baseline", action="store_true", help="live 执行前 WALK 目标，未实现的 GET OID 直接判 unsupported")
     r.add_argument("--dry-run", action="store_true", help="只筛选与调度，不发送任何 PDU")
     r.set_defaults(func=cmd_run)
 

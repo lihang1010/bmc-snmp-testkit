@@ -83,6 +83,7 @@
     <div class="card"><div class="label">有效通过率</div><div class="value">{{ summary.overall.effective_pass_rate }}%</div></div>
     <div class="card"><div class="label">用例总数</div><div class="value">{{ summary.overall.total }}</div></div>
     <div class="card"><div class="label">通过 / 失败 / 错误</div><div class="value"><span class="ok">{{ summary.overall.passed }}</span> / <span class="fail">{{ summary.overall.failed }}</span> / {{ summary.overall.error }}</div></div>
+    <div class="card"><div class="label">未实现 / 超时</div><div class="value"><span class="skip">{{ summary.overall.unsupported|default(0) }}</span> / <span class="warn">{{ summary.overall.timeout|default(0) }}</span></div></div>
     <div class="card"><div class="label">跳过 / 安全阻断</div><div class="value"><span class="skip">{{ summary.overall.skipped }}</span> / <span class="warn">{{ summary.overall.blocked }}</span></div></div>
     <div class="card"><div class="label">耗时</div><div class="value">{{ summary.duration_s }}s</div></div>
   </div>
@@ -104,10 +105,10 @@
   {% for dim, label in [('by_version','按 SNMP 版本'),('by_operation','按操作'),('by_module','按模块'),('by_target','按目标')] %}
   <h3 style="font-size:13px;color:var(--muted);margin:16px 0 8px;">{{ label }}</h3>
   <table>
-    <thead><tr><th>分组</th><th>总数</th><th>通过</th><th>失败</th><th>错误</th><th>跳过</th><th>阻断</th><th>通过率</th><th style="width:140px">分布</th></tr></thead>
+    <thead><tr><th>分组</th><th>总数</th><th>通过</th><th>失败</th><th>错误</th><th>跳过</th><th>阻断</th><th>未实现</th><th>超时</th><th>通过率</th><th style="width:140px">分布</th></tr></thead>
     <tbody>
     {% for key, g in summary[dim].items() %}
-      <tr><td>{{ key }}</td><td>{{ g.total }}</td><td class="ok">{{ g.passed }}</td><td class="fail">{{ g.failed }}</td><td>{{ g.error }}</td><td>{{ g.skipped }}</td><td>{{ g.blocked }}</td><td>{{ g.effective_pass_rate }}%</td>
+      <tr><td>{{ key }}</td><td>{{ g.total }}</td><td class="ok">{{ g.passed }}</td><td class="fail">{{ g.failed }}</td><td>{{ g.error }}</td><td>{{ g.skipped }}</td><td>{{ g.blocked }}</td><td class="skip">{{ g.unsupported|default(0) }}</td><td class="warn">{{ g.timeout|default(0) }}</td><td>{{ g.effective_pass_rate }}%</td>
       <td><div class="bar"><i style="width:{{ g.effective_pass_rate }}%;background:{{ 'var(--ok)' if g.effective_pass_rate >= 95 else 'var(--warn)' if g.effective_pass_rate >= 80 else 'var(--fail)' }}"></i></div></td></tr>
     {% endfor %}
     </tbody>
@@ -128,10 +129,25 @@
     {% if failures|length > 200 %}<p class="sub">仅显示前 200 条，完整数据见 results.json。</p>{% endif %}
   {% else %}<p class="ok">无失败用例。</p>{% endif %}
 
+  <h2>设备未实现 / 超时用例（{{ shortfalls|length }}）</h2>
+  {% if shortfalls %}
+    <p class="sub">这些用例未通过断言，但响应表明是设备未实现该 OID（noSuchName/noSuchObject/noSuchInstance）或未响应（timeout），不计入有效通过率分母。</p>
+    <div class="scroll"><table>
+      <thead><tr><th>用例 ID</th><th>名称</th><th>操作</th><th>版本</th><th>目标</th><th>状态</th><th>原因</th></tr></thead>
+      <tbody>
+      {% for r in shortfalls[:200] %}
+        <tr><td><code>{{ r.case_id }}</code></td><td>{{ r.name }}</td><td>{{ r.operation }}</td><td>{{ r.version }}</td><td>{{ r.target }}</td>
+        <td class="status {{ 'warn' if r.status == 'timeout' else 'skip' }}">{{ r.status }}</td><td>{{ r.message }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% if shortfalls|length > 200 %}<p class="sub">仅显示前 200 条，完整数据见 results.json。</p>{% endif %}
+  {% else %}<p class="ok">无未实现或超时用例。</p>{% endif %}
+
   <h2>全部用例（{{ results|length }}）</h2>
   <div class="controls">
     <input id="q" placeholder="搜索用例名 / OID / 用例 ID / 模块…">
-    <select id="status"><option value="">全部状态</option><option value="passed">passed</option><option value="failed">failed</option><option value="error">error</option><option value="skipped">skipped</option><option value="blocked">blocked</option></select>
+    <select id="status"><option value="">全部状态</option><option value="passed">passed</option><option value="failed">failed</option><option value="error">error</option><option value="skipped">skipped</option><option value="blocked">blocked</option><option value="unsupported">unsupported</option><option value="timeout">timeout</option></select>
     <select id="op"><option value="">全部操作</option><option>GET</option><option>GETNEXT</option><option>GETBULK</option><option>SET</option><option>TRAP</option><option>INFORM</option></select>
     <select id="ver"><option value="">全部版本</option><option>v1</option><option>v2c</option><option>v3</option></select>
   </div>
@@ -143,7 +159,7 @@
         <td><code>{{ r.case_id }}</code></td>
         <td>{{ r.name }}<br><span class="sub">{{ r.module }}</span></td>
         <td>{{ r.operation }}</td><td>{{ r.version }}</td><td>{{ r.target }}</td>
-        <td class="status {{ 'ok' if r.status == 'passed' else 'fail' if r.status in ('failed','error') else 'skip' }}">{{ r.status }}</td>
+        <td class="status {{ 'ok' if r.status == 'passed' else 'fail' if r.status in ('failed','error') else 'warn' if r.status == 'timeout' else 'skip' }}">{{ r.status }}</td>
         <td>{{ r.duration_ms }}</td>
         <td><details><summary class="link">查看</summary>{{ render_response(r.actual) }}</details></td>
         <td>{{ r.message }}</td>

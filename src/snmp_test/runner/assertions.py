@@ -72,6 +72,14 @@ def _usable_varbinds(response: SnmpResponse) -> list[Varbind]:
     return [v for v in response.varbinds if v.exception is None]
 
 
+def _value_varbinds(response: SnmpResponse) -> list[Varbind]:
+    # When v2c/v3 answers a GET with noSuchObject/noSuchInstance the PDU itself
+    # has noError, so the exception varbind is the only failure signal.  Treat
+    # it as the value carrier and let the type/domain assertion reject it.
+    usable = _usable_varbinds(response)
+    return usable or [v for v in response.varbinds if v.exception]
+
+
 def _rejected(response: SnmpResponse) -> bool:
     # A malformed value may be refused by the client adapter before any PDU is
     # sent; that is also a valid refusal and must not be reported as a failure.
@@ -217,21 +225,21 @@ def evaluate(
                 out.fail(f"varbind count {count} > {spec['max']}")
         elif kind == "value_type":
             allowed = list(spec.get("allowed") or [])
-            for vb in usable:
+            for vb in _value_varbinds(r):
                 if not _type_matches(vb.type, allowed):
                     out.fail(f"{vb.oid} type {vb.type!r} not in {allowed}")
         elif kind == "value_in":
             allowed = {str(x) for x in (spec.get("allowed") or [])}
-            for vb in usable:
+            for vb in _value_varbinds(r):
                 if str(vb.value) not in allowed:
                     out.fail(f"{vb.oid} value {vb.value!r} not in {sorted(allowed)}")
         elif kind == "value_in_range":
-            for vb in usable:
+            for vb in _value_varbinds(r):
                 number = _numeric(vb.value)
                 if number is None or not (float(spec["min"]) <= number <= float(spec["max"])):
                     out.fail(f"{vb.oid} value {vb.value!r} outside [{spec['min']}, {spec['max']}]")
         elif kind == "value_length":
-            for vb in usable:
+            for vb in _value_varbinds(r):
                 length = len(str(vb.value))
                 if not (int(spec["min"]) <= length <= int(spec["max"])):
                     out.fail(f"{vb.oid} length {length} outside [{spec['min']}, {spec['max']}]")

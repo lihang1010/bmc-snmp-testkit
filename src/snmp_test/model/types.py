@@ -367,7 +367,7 @@ class SnmpResponse:
 class CaseResult:
     case_id: str
     name: str
-    status: str = "error"  # passed | failed | error | skipped | blocked
+    status: str = "error"  # passed | failed | error | skipped | blocked | unsupported | timeout
     operation: str = ""
     version: str = ""
     module: str = ""

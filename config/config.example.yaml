@@ -79,6 +79,8 @@ execution:
   enable_set: true
   seed: 20261109
   limit: 0                       # >0 时只执行前 N 条（快速冒烟）
+  oid_baseline: false            # live 运行前 WALK 一次，未实现的 GET OID 直接判 unsupported
+  oid_baseline_max: 20000        # 基线最多记录多少个 OID，防止超大设备拖慢启动
 
 safety:
   policy_file: config/safety-policy.yaml

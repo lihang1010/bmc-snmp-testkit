@@ -205,15 +205,19 @@ finally:
 
 ## 6. 报告里的数字怎么算
 
-**五种 status**
+**七种 status**
 
 | status | 含义 |
 | --- | --- |
 | `passed` | 所有断言成立 |
 | `failed` | 至少一条断言不成立（期望 vs 实际不符） |
-| `error` | 框架层异常（超时未归类、还原中止、代码异常） |
+| `error` | 框架层异常（还原中止、代码异常） |
 | `skipped` | 设计性跳过（如 v1 不支持 GETBULK、`--dry-run`） |
 | `blocked` | 安全策略拦截，**是策略生效的证据，不是漏测** |
+| `unsupported` | MIB 声明了该 OID，但设备返回 `noSuchName` / `noSuchObject` / `noSuchInstance`，即未实现 |
+| `timeout` | 请求超时，设备未回应；常见于未实现的子树或网络/ACL 丢弃 |
+
+`unsupported` 与 `timeout` 只在断言失败时归类；如果用例本身就以拒绝/超时为期望（如 `auth_rejected`），仍按断言结果记为 `passed`。
 
 **两个通过率**
 
@@ -222,7 +226,9 @@ pass_rate            = 100 * passed / total
 effective_pass_rate  = 100 * passed / (passed + failed + error)
 ```
 
-后者把 `skipped` / `blocked` 从分母剔除，衡量「真正跑了的用例里有多少通过」。分组统计有 4 个维度：`by_version` / `by_operation` / `by_module` / `by_target`。
+后者把 `skipped` / `blocked` / `unsupported` / `timeout` 从分母剔除，衡量「设备实际可测且断言真正失败」的比例。分组统计有 4 个维度：`by_version` / `by_operation` / `by_module` / `by_target`。
+
+真实设备上如果大量 OID 未实现，建议加 `--oid-baseline`（或配置 `execution.oid_baseline: true`）：执行前先按目标 WALK 企业根，基线中不存在的 GET 实例直接记 `unsupported`，不再逐条等待超时；WALK 本身失败（认证/网络）时自动退化为正常执行，不会把整批用例误判为未实现。
 
 真实对照：
 

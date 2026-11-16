@@ -65,6 +65,7 @@ python -m snmp_test.cli mock-agent --seconds 60
 | `--no-set` | 本次完全禁用 SET |
 | `--allow-guarded` | 显式放行白名单内的高危 SET（危险） |
 | `--mode live --allow-live` | 显式连接真实 BMC（危险，默认拒绝） |
+| `--oid-baseline` | live 执行前先 WALK 目标，MIB 已声明但设备未实现的 GET OID 直接判 `unsupported`（也可用 `execution.oid_baseline: true` 持久开启） |
 
 通过 pytest 运行（CI / marker 过滤 / `--lf`）：
 

@@ -471,7 +471,11 @@ class JobRunner:
                 job.message = job.message or "任务已被用户中断"
             else:
                 job.status = "done"
-                job.message = f"{summary['passed']}/{summary['total']} passed, effective {summary['effective_pass_rate']}%"
+                job.message = (
+                    f"{summary['passed']}/{summary['total']} passed, "
+                    f"unsupported {summary['unsupported']}, timeout {summary['timeout']}, "
+                    f"effective {summary['effective_pass_rate']}%"
+                )
         finally:
             runtime.close()
 

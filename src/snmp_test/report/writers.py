@@ -35,6 +35,7 @@ def write_results_json(collector: ResultCollector, extra: dict[str, Any] | None 
         "summary": collector.summary(),
         "results": collector.results_dict(),
         "failures": collector.failures(),
+        "shortfalls": collector.shortfalls(),
         **(extra or {}),
     }
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
@@ -49,7 +50,7 @@ def write_junit_xml(collector: ResultCollector) -> Path:
         groups.setdefault(result["operation"], []).append(result)
     for operation, items in sorted(groups.items()):
         failures = sum(1 for r in items if r["status"] in ("failed", "error"))
-        skipped = sum(1 for r in items if r["status"] in ("skipped", "blocked"))
+        skipped = sum(1 for r in items if r["status"] in ("skipped", "blocked", "unsupported", "timeout"))
         suite = ET.SubElement(
             suites,
             "testsuite",
@@ -75,7 +76,7 @@ def write_junit_xml(collector: ResultCollector) -> Path:
             if r["status"] in ("failed", "error"):
                 failure = ET.SubElement(case, "failure", {"message": r["message"][:500]})
                 failure.text = json.dumps(r.get("actual", {}), ensure_ascii=False, default=str)[:4000]
-            elif r["status"] in ("skipped", "blocked"):
+            elif r["status"] in ("skipped", "blocked", "unsupported", "timeout"):
                 ET.SubElement(case, "skipped", {"message": r["message"][:500]})
     ET.ElementTree(suites).write(path, encoding="utf-8", xml_declaration=True)
     return path
@@ -97,6 +98,7 @@ def write_html_report(collector: ResultCollector, context: dict[str, Any]) -> Pa
         "summary": summary,
         "results": collector.results_dict(),
         "failures": collector.failures(),
+        "shortfalls": collector.shortfalls(),
         "log_tail": log_tail,
         **context,
     }

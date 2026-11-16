@@ -11,7 +11,7 @@ from typing import Any
 from snmp_test.config import Config
 from snmp_test.model.types import CaseResult, SnmpResponse
 
-TERMINAL = ("passed", "failed", "error", "skipped", "blocked")
+TERMINAL = ("passed", "failed", "error", "skipped", "blocked", "unsupported", "timeout")
 
 
 class ResultCollector:
@@ -132,6 +132,9 @@ class ResultCollector:
 
     def failures(self) -> list[dict[str, Any]]:
         return [r.to_dict() for r in self.results if r.status in ("failed", "error", "blocked")]
+
+    def shortfalls(self) -> list[dict[str, Any]]:
+        return [r.to_dict() for r in self.results if r.status in ("unsupported", "timeout")]
 
     def results_dict(self) -> list[dict[str, Any]]:
         return [r.to_dict() for r in self.results]

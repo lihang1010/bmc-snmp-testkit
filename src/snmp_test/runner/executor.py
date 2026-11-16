@@ -17,6 +17,7 @@ from snmp_test.report.collector import ResultCollector
 from snmp_test.runner.assertions import evaluate
 from snmp_test.runner.safety import SafetyAbort, SafetyGateway, load_policy
 from snmp_test.security import SecurityPolicy
+from snmp_test.snmp.errors import is_timeout
 from snmp_test.snmp.mock_agent import MockAgent
 from snmp_test.snmp.trap_listener import TrapListener
 from snmp_test.snmp.transport import TransportPool
@@ -61,6 +62,9 @@ class Runtime:
         self.set_locks: dict[str, asyncio.Lock] = {}
         self.trap_lock = asyncio.Lock()
         self.aborted_targets: set[str] = set()
+        self.oid_baseline = bool(ex.get("oid_baseline", False))
+        self.oid_baseline_max = max(1, int(ex.get("oid_baseline_max", 20000)))
+        self._baseline_cache: dict[tuple[str, str], set[str] | None] = {}
         self.policy = load_policy(cfg.resolve(str(cfg.safety.get("policy_file", "config/safety-policy.yaml"))))
         self.collector = ResultCollector(cfg, self.run_id, self.run_dir)
         effective_guarded = (
@@ -119,15 +123,19 @@ class Runtime:
             for target in self.targets_for(case):
                 pairs.append((target, case))
         self.collector.logger.info("scheduled %d case x target executions", len(pairs))
+        planned = len(pairs)
         # Progress is reported from inside _run_one (per completed case) instead
         # of from the wait loop: awaiting completions one by one (as_completed)
         # perturbs event-loop scheduling enough to make SNMP timeouts flaky.
         self._progress_cb = on_progress
-        self._progress_total = len(pairs)
+        self._progress_total = planned
         self._progress_done = 0
         self._progress_passed = 0
         self._progress_failed = 0
-        results: list[CaseResult] = []
+        baseline_results: list[CaseResult] = []
+        if self.oid_baseline and not dry_run:
+            pairs, baseline_results = await self._apply_baseline(pairs, cancel_event=cancel_event)
+        results: list[CaseResult] = list(baseline_results)
         chunk = 50
         for start in range(0, len(pairs), chunk):
             if cancel_event is not None and cancel_event.is_set():
@@ -147,9 +155,119 @@ class Runtime:
         self._progress_done += 1
         if result.status == "passed":
             self._progress_passed += 1
-        elif result.status in ("failed", "error"):
+        elif result.status in ("failed", "error", "timeout", "unsupported"):
             self._progress_failed += 1
         cb(self._progress_done, self._progress_total, self._progress_passed, self._progress_failed)
+
+    async def _apply_baseline(
+        self,
+        pairs: list[tuple[TargetConfig, TestCase]],
+        *,
+        cancel_event: asyncio.Event | None = None,
+    ) -> tuple[list[tuple[TargetConfig, TestCase]], list[CaseResult]]:
+        """Mark GETs whose instance OID is absent from a live walk as unsupported."""
+        wanted_versions = {
+            (target.name, case.version)
+            for target, case in pairs
+            if self._baseline_applicable(case)
+        }
+        for target_name, version in sorted(wanted_versions):
+            if cancel_event is not None and cancel_event.is_set():
+                break
+            target = next((t for t in self.cfg.targets if t.name == target_name), None)
+            if target is None:
+                continue
+            await self._baseline_oids(target, version)
+
+        to_run: list[tuple[TargetConfig, TestCase]] = []
+        preclassified: list[CaseResult] = []
+        for target, case in pairs:
+            implemented = self._baseline_cache.get((target.name, case.version))
+            if implemented is not None and self._baseline_applicable(case):
+                wanted = [str(v.get("oid")) for v in case.payload.get("varbinds") or [] if v.get("oid")]
+                if wanted and not any(oid in implemented for oid in wanted):
+                    result = CaseResult(
+                        case_id=case.case_id,
+                        name=case.name,
+                        status="unsupported",
+                        operation=case.operation,
+                        version=case.version,
+                        module=case.module,
+                        target=target.name,
+                        tags=case.tags,
+                        expectation=case.expectation,
+                        message=f"OID absent from {target.name}/{case.version} baseline walk",
+                    )
+                    self.collector.add(result)
+                    self._bump_progress(result)
+                    preclassified.append(result)
+                    continue
+            to_run.append((target, case))
+        self.collector.logger.info(
+            "oid baseline: %d preclassified unsupported, %d will be executed",
+            len(preclassified), len(to_run),
+        )
+        return to_run, preclassified
+
+    def _baseline_applicable(self, case: TestCase) -> bool:
+        if case.operation != "GET" or not case.payload.get("varbinds"):
+            return False
+        kinds = {str(spec.get("kind", "")) for spec in case.expectation.get("assertions") or []}
+        return not (kinds & {"rejected", "no_such", "end_of_mib", "auth_rejected", "client_error"})
+
+    async def _baseline_oids(self, target: TargetConfig, version: str) -> set[str] | None:
+        key = (target.name, version)
+        if key in self._baseline_cache:
+            return self._baseline_cache[key]
+        session = await self.pool.session(target, version)
+        root = self.model.root_oid.strip(".")
+        root_prefix = root + "."
+        current = root
+        found: set[str] = set()
+        error = ""
+        while len(found) < self.oid_baseline_max:
+            if version == "v1":
+                response = await session.get_next([current])
+                varbinds = list(response.varbinds[:1])
+            else:
+                response = await session.get_bulk(
+                    [current], non_repeaters=0, max_repetitions=25,
+                )
+                varbinds = list(response.varbinds)
+            if response.error_indication or response.error_status not in ("noError", "0"):
+                error = response.error_indication or response.error_status
+                break
+            progressed = False
+            stop = False
+            for varbind in varbinds:
+                if varbind.exception is not None:
+                    stop = True
+                    break
+                if varbind.oid != root and not varbind.oid.startswith(root_prefix):
+                    stop = True
+                    break
+                if _oid_key(varbind.oid) <= _oid_key(current):
+                    stop = True
+                    break
+                current = varbind.oid
+                found.add(varbind.oid)
+                progressed = True
+                if len(found) >= self.oid_baseline_max:
+                    break
+            if stop or not progressed:
+                break
+        if error or not found:
+            self.collector.logger.warning(
+                "oid baseline unavailable for %s/%s (%s); GET cases will run normally",
+                target.name, version, error or "empty walk",
+            )
+            self._baseline_cache[key] = None
+        else:
+            self.collector.logger.info(
+                "oid baseline for %s/%s: %d OIDs discovered", target.name, version, len(found),
+            )
+            self._baseline_cache[key] = found
+        return self._baseline_cache[key]
 
     async def run_one(self, target: TargetConfig, case: TestCase) -> CaseResult:
         """Public single-case entry point used by the pytest bridge."""
@@ -273,12 +391,30 @@ class Runtime:
     def _finish(self, result: CaseResult, response: SnmpResponse) -> None:
         outcome = evaluate(result_case_from_result(result), response)
         result.actual = {**response.to_dict(), "_assertions": outcome.details}
-        result.status = "passed" if outcome.passed else "failed"
-        result.message = "; ".join(outcome.failures) if outcome.failures else "all assertions passed"
+        if outcome.passed:
+            result.status = "passed"
+            result.message = "all assertions passed"
+        else:
+            # A failing read is not always a product defect: the device may not
+            # implement the MIB-declared OID, or may not answer at all.  Keeping
+            # those outcomes separate keeps the effective pass rate meaningful.
+            result.status = shortfall_status(response) or "failed"
+            result.message = "; ".join(outcome.failures)
         self.collector.add_pdu(
             case_id=result.case_id, target=result.target, version=result.version,
             operation=result.operation, response=response,
         )
+
+
+def shortfall_status(response: SnmpResponse) -> str | None:
+    """Classify a failed response that reflects device support, not assertions."""
+    if is_timeout(response.error_indication):
+        return "timeout"
+    if response.error_status == "noSuchName":
+        return "unsupported"
+    if any(v.exception in ("NoSuchObject", "NoSuchInstance") for v in response.varbinds):
+        return "unsupported"
+    return None
 
 
 def _TestCaseStub(result: CaseResult) -> TestCase:  # pragma: no cover - helper
@@ -305,6 +441,13 @@ def json_safe(value: Any) -> str:
     import json
 
     return json.dumps(value, ensure_ascii=False, default=str)[:1500]
+
+
+def _oid_key(oid: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(part) for part in oid.strip(".").split("."))
+    except ValueError:
+        return ()
 
 
 async def run_batch(

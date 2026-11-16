@@ -72,6 +72,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enable_set": True,
         "seed": 20261109,
         "limit": 0,
+        "oid_baseline": False,
+        "oid_baseline_max": 20000,
     },
     "safety": {"policy_file": "config/safety-policy.yaml"},
     "report": {
