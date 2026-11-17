@@ -42,6 +42,17 @@
     transition:transform .12s,box-shadow .18s,background .18s,border-color .18s,opacity .18s}
   .btn:active{transform:translateY(1px)}
   .btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .spinner{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:50%;animation:spin .7s linear infinite;
+    border:2px solid rgba(2,132,199,.25);border-top-color:var(--accent)}
+  .btn.is-loading::before{content:"";width:11px;height:11px;flex:0 0 auto;border-radius:50%;
+    animation:spin .7s linear infinite;border:2px solid rgba(255,255,255,.55);border-top-color:#fff}
+  .btn--ghost.is-loading::before{border-color:rgba(2,132,199,.28);border-top-color:var(--accent)}
+  .probe-status{display:inline-flex;align-items:center;gap:7px;padding:4px 11px;border-radius:999px;
+    font-size:11px;font-weight:650;border:1px solid #bae6fd;background:#e0f2fe;color:#0369a1;
+    max-width:min(420px,40vw);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .probe-status.ok{border-color:#d1fae5;background:#ecfdf5;color:#047857}
+  .probe-status.fail{border-color:#fecaca;background:#fef2f2;color:#b91c1c}
   .btn--sm{height:30px;padding:0 12px;font-size:12px}
   .btn--primary{color:#fff;background:linear-gradient(135deg,#0ea5e9,#06b6d4);box-shadow:0 6px 16px rgba(14,165,233,.24)}
   .btn--primary:hover:not(:disabled){filter:brightness(1.04)}
@@ -169,6 +180,7 @@
     <div><h1>MIB 浏览器</h1><div class="sub">导入 MIB · 展开 OID 树 · 表格化查看返回值</div></div>
   </div>
   <div class="nav">
+    <span class="probe-status hidden" id="probeStatus"><span class="spinner" id="probeSpinner"></span><span id="probeStatusText"></span></span>
     <span class="pill" id="statusPill">加载中…</span>
     <a class="btn btn--ghost btn--sm" href="/audit">操作记录</a>
     <a class="btn btn--ghost btn--sm" href="/">返回控制台</a>
@@ -197,7 +209,7 @@
 
 <div class="toolbar">
   <div class="oid-row">
-    <input id="oid" placeholder="OID（点击左侧节点自动填入）">
+    <input id="oid" placeholder="单击左侧节点填入 OID，双击节点执行探测">
     <button class="btn btn--ghost" type="button" id="getBtn">GET</button>
     <button class="btn btn--ghost" type="button" id="nextBtn">GETNEXT</button>
     <button class="btn btn--primary" type="button" id="walkBtn">WALK</button>
@@ -206,7 +218,7 @@
     <button class="btn btn--ghost" type="button" id="refreshBtn">刷新</button>
     <button class="btn btn--ghost" type="button" id="exportBtn">导出 CSV</button>
   </div>
-  <div class="walk-hint">WALK <input id="maxResults" type="number" value="200" min="1" max="200"> 条/页，截断自动续页</div>
+  <div class="walk-hint">单击选中 · <b>双击节点执行</b>（标量 GET，其余 WALK） · 每页 <input id="maxResults" type="number" value="200" min="1" max="200"> 条，截断自动续页</div>
   <label class="auto-refresh"><input id="autoRefresh" type="checkbox"> 自动刷新 <input id="refreshSeconds" type="number" value="10" min="2" max="600"> 秒</label>
 </div>
 
@@ -232,7 +244,7 @@
   </aside>
   <div class="splitter" id="splitter" title="拖动调整宽度"></div>
   <main class="result-pane">
-    <div class="result-meta" id="resultMeta"><span class="muted">选择左侧节点或填写 OID 后执行探测</span></div>
+    <div class="result-meta" id="resultMeta"><span class="muted">单击左侧节点选中，双击执行（标量 GET / 其他 WALK）；也可填写 OID 后点按钮</span></div>
     <div class="view-tabs" id="viewTabs">
       <span class="muted">视图</span>
       <label class="chk"><input type="radio" name="view" value="smart" checked> Table View（表格）</label>
@@ -266,6 +278,6 @@
   </div>
 </div>
 <div id="toast"></div>
-<script src="/static/mib-browser.js"></script>
+<script src="/static/mib-browser.js?v=2"></script>
 </body>
 </html>

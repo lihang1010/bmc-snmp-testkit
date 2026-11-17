@@ -641,13 +641,15 @@ def test_mib_browser_page_and_tree_api(web):
     assert page.status_code == 200
     assert "/static/mib-browser.js" in page.text and 'id="tree"' in page.text
     for token in ('id="exportBtn"', 'id="autoRefresh"', 'id="contextMenu"',
-                  'id="setBtn"', 'id="setDialog"', 'id="setValue"', 'data-act="set"'):
+                  'id="setBtn"', 'id="setDialog"', 'id="setValue"', 'data-act="set"',
+                  'id="probeStatus"', 'class="spinner"'):
         assert token in page.text, token
     js = client.get("/static/mib-browser.js", headers=_headers(alice))
     assert js.status_code == 200
     assert all(t in js.text for t in (
         "loadTree", "formatValue", "exportCsv", "contextmenu",
         "openSetDialog", "instanceRows", "childrenOf",
+        "dblclick", "probeNode", "setProbeStatus",
     ))
 
     # Debug console and the "local self-test" switch are gone from the web UI.

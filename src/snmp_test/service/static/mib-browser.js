@@ -28,6 +28,17 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function(){ t.style.display = 'none'; }, 4200);
   }
+  function setProbeStatus(text, state){
+    var el = $('probeStatus');
+    if(!el) return;
+    if(state === 'hidden'){ el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    el.classList.toggle('ok', state === 'ok');
+    el.classList.toggle('fail', state === 'fail');
+    $('probeSpinner').classList.toggle('hidden', state !== 'busy');
+    $('probeStatusText').textContent = text;
+    el.title = text;
+  }
 
   var treeData = null;          // {nodes, tables, module_name, root_oid, total}
   var currentMibId = '';        // mib_id of the tree currently shown
@@ -174,7 +185,11 @@
     row.__node = node;
     row.addEventListener('click', function(){
       if(node.__synthetic === 'row') showInstanceDetail(node.__table, node.__index);
-      else if(node.__synthetic !== 'instances') selectNode(node);
+      else selectNode(node);
+    });
+    row.addEventListener('dblclick', function(e){
+      if(e.target.classList.contains('tree-toggle')) return;
+      probeNode(node);
     });
     return row;
   }
@@ -283,12 +298,34 @@
     showNodeDetail(node);
     var oid = node.oid || '';
     if(node.kind === 'scalar'){
+      $('oid').value = oid ? oid + '.0' : '';
+    } else {
+      $('oid').value = oid;
+      if(node.kind === 'table' || node.kind === 'entry') setView('smart');
+    }
+  }
+
+  // Single click only selects; double click (or toolbar/context menu) probes.
+  function probeNode(node){
+    if(!node) return;
+    if(node.__synthetic === 'row'){
+      var cols = tableCols[node.__table] || [];
+      var first = cols[0];
+      var rowOid = first ? (first.oid + '.' + node.__index) : node.oid;
+      $('oid').value = rowOid;
+      runProbe('GET', rowOid);
+      return;
+    }
+    if(node.__synthetic === 'instances'){
+      $('oid').value = node.oid;
+      runProbe('WALK', node.oid);
+      return;
+    }
+    var oid = node.oid || '';
+    if(!oid) return;
+    if(node.kind === 'scalar'){
       $('oid').value = oid + '.0';
       runProbe('GET', oid + '.0');
-    } else if(node.kind === 'group'){
-      // A group may hold a huge subtree: fill the OID but let the user start the walk.
-      $('oid').value = oid;
-      toast('已选中 '+node.name+'，点击 WALK 探测此子树');
     } else {
       $('oid').value = oid;
       if(node.kind === 'table' || node.kind === 'entry') setView('smart');
@@ -330,6 +367,11 @@
         acc.truncated = d.truncated;
         if(!d.ok){ acc.ok = false; acc.error = d.error; }
       }
+      if(b.operation === 'WALK'){
+        var progress = 'WALK 中… 已取 ' + acc.count + ' 条（第 ' + pages + ' 页）';
+        setProbeStatus(progress, 'busy');
+        $('resultMeta').innerHTML = '<span class="muted">' + esc(progress) + '</span>';
+      }
       if(d.ok && b.operation === 'WALK' && d.truncated && d.next_cursor &&
          (d.varbinds || []).length && pages < MAX_PAGES){
         return walkPage(Object.assign({}, b, {cursor:d.next_cursor}), acc, pages+1);
@@ -362,16 +404,28 @@
     }
     lastRequest = body;
     busy = true; setButtons(true);
+    var opBtn = {GET:'getBtn', GETNEXT:'nextBtn', WALK:'walkBtn', SET:'setBtn'}[operation];
+    if(opBtn) $(opBtn).classList.add('is-loading');
+    setProbeStatus(operation === 'WALK' ? 'WALK 中…（长表可能需要数秒）' : operation + ' 请求中…', 'busy');
     $('resultMeta').innerHTML = '<span class="muted">探测中… '+esc(operation)+' '+esc(oid)+'</span>';
     walkPage(body, null, 1).then(function(d){
       lastResult = d;
       renderResult(d);
-      if(!d.ok) toast('探测返回错误: '+(d.error || ''), true);
-      else if(operation === 'SET') toast('SET 已执行，建议 GET/刷新读回确认');
+      if(!d.ok){
+        toast('探测返回错误: '+(d.error || ''), true);
+        setProbeStatus(operation + ' 失败 · '+(d.error || '未知错误'), 'fail');
+      } else {
+        setProbeStatus(operation + ' 完成 · '+d.count+' 条 · '+Math.round(d.elapsed_ms)+' ms', 'ok');
+        if(operation === 'SET') toast('SET 已执行，建议 GET/刷新读回确认');
+      }
     }).catch(function(e){
       toast('探测失败: '+e.message, true);
+      setProbeStatus(operation + ' 失败 · '+e.message, 'fail');
       $('resultMeta').innerHTML = '<span class="badge badge--fail">失败</span><span>'+esc(e.message)+'</span>';
-    }).finally(function(){ busy = false; setButtons(false); });
+    }).finally(function(){
+      busy = false; setButtons(false);
+      if(opBtn) $(opBtn).classList.remove('is-loading');
+    });
   }
 
   // ------------------------------------------------------------- result views
