@@ -365,8 +365,8 @@
           <div class="field"><label for="host">目标 IP</label><input id="host" placeholder="真实 BMC IP"></div>
           <div class="field"><label for="port">端口</label><input id="port" type="number" value="161"></div>
           <div class="field"><label for="version">SNMP 版本</label><select id="version"><option>v1</option><option>v2c</option><option>v3</option></select></div>
-          <div class="field"><label for="limit">用例上限</label><input id="limit" type="number" value="20" min="1" max="500"></div>
-          <div class="field span2"><label class="checkbox"><input type="checkbox" id="runAll"> 跑全量用例（不限数量，可能耗时较长）</label></div>
+          <div class="field"><label for="limit">数量（前 N 条）</label><input id="limit" type="number" value="20" min="1" max="500"></div>
+          <div class="field span2"><label class="checkbox"><input type="checkbox" id="runAll"> 所选范围内全部用例（不限数量，可能耗时较长）</label></div>
           <div class="field"><label for="mibId">MIB ID</label><input id="mibId" placeholder="从左侧列表选择或粘贴"></div>
           <div class="field"><label for="modules">模块</label><select id="modules" disabled><option value="">全部模块</option></select></div>
           <div id="v1cred" class="span2">
@@ -568,7 +568,7 @@
     } else { cred={community:$('community').value}; }
     var runAll = $('runAll').checked;
     var limitVal = parseInt($('limit').value, 10);
-    if(!runAll && (!limitVal || limitVal < 1)){ toast('请填写有效的用例上限（≥1），或勾选「跑全量用例」', true); return; }
+    if(!runAll && (!limitVal || limitVal < 1)){ toast('请填写有效的用例数量（≥1），或勾选「所选范围内全部用例」', true); return; }
     var body={
       mib_id:$('mibId').value.trim(), mode:'live',
       target_host:$('host').value.trim(), target_port:parseInt($('port').value||'161',10),
