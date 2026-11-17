@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from snmp_test.config import load_config
 from snmp_test.model.types import MibModel
 from snmp_test.report.writers import write_all
@@ -191,6 +193,9 @@ class JobRunner:
         self.config_path = Path(config_path) if config_path else self.root / "config" / "web.yaml"
         self.web_security = dict(web_security or {})
         self.policy = WebPolicy.from_security(self.web_security)
+        settings = self._job_settings()
+        self.timeout_s = max(0.1, float(settings.get("timeout_s", 5.0)))
+        self.retries = max(0, int(settings.get("retries", 1)))
         self.probe = probe
         self.queue: asyncio.Queue[Job | None] = asyncio.Queue()
         self.workers = max(1, min(int(workers), MAX_WORKERS))
@@ -202,6 +207,15 @@ class JobRunner:
     @property
     def current_jobs(self) -> list[str]:
         return [job_id for job_id in self._current.values() if job_id]
+
+    def _job_settings(self) -> dict[str, Any]:
+        if not self.config_path.is_file():
+            return {}
+        try:
+            raw = yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return {}
+        return dict(raw.get("jobs") or {})
 
     async def start(self) -> "JobRunner":
         for slot in range(self.workers):
@@ -338,7 +352,7 @@ class JobRunner:
             },
             "trap": {"listen_host": "127.0.0.1", "listen_port": trap_port, "receive_timeout_s": 5.0},
             "execution": {
-                "concurrency": 4, "timeout_s": 3.0, "retries": 0,
+                "concurrency": 4, "timeout_s": self.timeout_s, "retries": self.retries,
                 "rows_per_table": 2, "max_cases_per_table": 8,
                 "max_varbinds": 20, "bulk_max_repetitions": 6,
                 "allow_guarded": False, "enable_set": False, "limit": 0, "seed": 20261109,

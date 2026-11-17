@@ -193,6 +193,27 @@ def test_stale_case_cache_is_regenerated(web):
     assert "value_in" not in kinds and "value_in_range" in kinds
 
 
+def test_job_and_probe_timeouts_are_configurable(tmp_path):
+    global _APP_COUNTER
+    _APP_COUNTER += 1
+    os.environ["SNMP_TEST_PROBE_MOCK_PORT"] = str(13200 + _APP_COUNTER)
+    os.environ["SNMP_TEST_PROBE_TRAP_PORT"] = str(14200 + _APP_COUNTER)
+    root = tmp_path / "timeouts"
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "web.yaml").write_text(
+        "jobs:\n  timeout_s: 7\n  retries: 2\n"
+        "probe:\n  timeout_s: 6\n  retries: 1\n",
+        encoding="utf-8",
+    )
+    shutil.copy(ROOT / "config" / "safety-policy.yaml", root / "config" / "safety-policy.yaml")
+    app = create_app(root=root, config_path=root / "config" / "web.yaml")
+    with TestClient(app) as client:
+        token = _register(client, "timeouts@example.com")
+        cfg = client.get("/api/config", headers=_headers(token)).json()
+        assert cfg["job_timeout_s"] == 7.0 and cfg["job_retries"] == 2
+        assert cfg["probe_timeout_s"] == 6.0 and cfg["probe_retries"] == 1
+
+
 def test_readonly_job_end_to_end(web):
     client, root, _, alice, bob = web
     mib_id = client.get("/api/mibs", headers=_headers(alice)).json()["mibs"][0]["mib_id"]
@@ -491,6 +512,7 @@ def test_snmp_probe(web):
     assert caps["mock_set"] is True and caps["live_set"] is True
     assert caps["audit_enabled"] is True
     assert caps["session_cache_size"] >= 1
+    assert caps["probe_timeout_s"] == 5.0 and caps["probe_retries"] == 0
 
     base = {"mode": "mock", "version": "v1"}
     got = client.post(

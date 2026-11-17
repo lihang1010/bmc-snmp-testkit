@@ -26,9 +26,17 @@
 # 旧的顶层 security.allow_live / allowed_targets 与 auth.users 属于历史模板，不再读取。
 # 被策略拒绝的操作也写入审计（policy_denied）。
 
-# 交互探测（MIB 浏览器 / 探测面板）的吞吐与连接复用：
+# SNMP 超时：timeout_s 是每次尝试的超时，最坏耗时约为 timeout_s × (retries + 1)。
+# 批量任务：
+# jobs:
+#   timeout_s: 5                # 单次请求超时（秒）
+#   retries: 1                  # 超时后的重试次数
+#
+# 交互探测（MIB 浏览器 / 探测面板）的吞吐、连接复用与超时：
 # 会话按「目标 + SNMP 版本 + 凭据」缓存复用，WALK 在 v2c/v3 下用 GETBULK 批量拉取。
 # probe:
+#   timeout_s: 5                # 单次请求超时（秒）
+#   retries: 0                  # 页面操作不自动重试，避免交互等待过久
 #   concurrency: 4              # live 探测最大并发请求数
 #   rate_limit_ms: 0            # 同一目标两次请求的最小间隔（毫秒）；0 = 不限速
 #   session_ttl_s: 300          # 空闲会话保留时间，超时后关闭

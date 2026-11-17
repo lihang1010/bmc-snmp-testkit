@@ -114,6 +114,8 @@ class ProbeService:
         probe_cfg = self._probe_settings()
         self.concurrency = max(1, int(probe_cfg.get("concurrency", 4)))
         self.rate_limit_ms = max(0.0, float(probe_cfg.get("rate_limit_ms", 0)))
+        self.timeout_s = max(0.1, float(probe_cfg.get("timeout_s", 5.0)))
+        self.retries = max(0, int(probe_cfg.get("retries", 0)))
         self.session_ttl = max(1.0, float(probe_cfg.get("session_ttl_s", 300)))
         self.session_cache_size = max(1, int(probe_cfg.get("session_cache_size", 16)))
         self._live_sem = asyncio.Semaphore(self.concurrency)
@@ -151,6 +153,8 @@ class ProbeService:
             "asn1_types": list(ASN1_TYPES),
             "probe_concurrency": self.concurrency,
             "probe_rate_limit_ms": self.rate_limit_ms,
+            "probe_timeout_s": self.timeout_s,
+            "probe_retries": self.retries,
             "session_cache_size": self.session_cache_size,
         }
 
@@ -261,7 +265,7 @@ class ProbeService:
             },
             "trap": {"listen_host": "127.0.0.1", "listen_port": self.trap_port,
                      "receive_timeout_s": 5.0},
-            "execution": {"concurrency": 1, "timeout_s": 2.0, "retries": 0,
+            "execution": {"concurrency": 1, "timeout_s": self.timeout_s, "retries": self.retries,
                           "enable_set": True, "limit": 0},
             "security": {
                 "allow_live": True,
