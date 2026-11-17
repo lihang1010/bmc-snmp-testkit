@@ -187,6 +187,44 @@ def test_upload_is_shared_between_accounts(web):
     assert client.get("/api/mibs/does-not-exist", headers=_headers(alice)).status_code == 404
 
 
+def test_mib_modules_and_module_filtered_job(web):
+    client, _, _, alice, _ = web
+    rec = client.post("/api/mibs", content=MIB_BYTES, headers=_headers(alice)).json()["mib"]
+    mib_id = rec["mib_id"]
+
+    modules = {
+        m["name"]: m
+        for m in client.get(f"/api/mibs/{mib_id}/modules", headers=_headers(alice)).json()["modules"]
+    }
+    assert {"serverAssetInfo", "serverBmcInfo", "serverStatus"} <= set(modules)
+    assert modules["serverStatus"]["oid"] == "1.3.6.1.4.1.52305.7"
+    assert modules["serverAssetInfo"]["node_count"] > 100
+    assert client.get(
+        "/api/mibs/deadbeefdeadbeef/modules", headers=_headers(alice)
+    ).status_code == 404
+
+    page = client.get("/", headers=_headers(alice)).text
+    assert '<select id="modules"' in page and "loadModules" in page
+
+    payload = {
+        "mib_id": mib_id, "mode": "mock", "target_host": "127.0.0.1",
+        "target_port": 11811, "version": "v2c", "limit": 6,
+        "modules": ["serverStatus"],
+    }
+    job_id = client.post("/api/jobs", json=payload, headers=_headers(alice)).json()["job"]["job_id"]
+    job = _wait_done(client, job_id, alice)
+    assert job["status"] == "done" and job["case_count"] == 6
+    results = client.get(f"/runs/{job['run_id']}/results.json", headers=_headers(alice)).json()
+    assert results["results"]
+    prefix = "1.3.6.1.4.1.52305.7"
+    for result in results["results"]:
+        varbinds = (result.get("actual") or {}).get("varbinds") or []
+        assert result["module"] in ("serverStatus", "module:serverStatus") or any(
+            vb.get("oid") == prefix or str(vb.get("oid") or "").startswith(prefix + ".")
+            for vb in varbinds
+        ), result
+
+
 def test_stale_case_cache_is_regenerated(web):
     """Old cases.json files must be rebuilt instead of keeping outdated assertions."""
     client, root, _, alice, _ = web

@@ -368,7 +368,7 @@
           <div class="field"><label for="limit">用例上限</label><input id="limit" type="number" value="20" min="1" max="500"></div>
           <div class="field span2"><label class="checkbox"><input type="checkbox" id="runAll"> 跑全量用例（不限数量，可能耗时较长）</label></div>
           <div class="field"><label for="mibId">MIB ID</label><input id="mibId" placeholder="从左侧列表选择或粘贴"></div>
-          <div class="field"><label for="modules">模块过滤（可选）</label><input id="modules" placeholder="serverSysInfo,serverStatus"></div>
+          <div class="field"><label for="modules">模块</label><select id="modules" disabled><option value="">全部模块</option></select></div>
           <div id="v1cred" class="span2">
             <label for="community">团体字（仅在内存中使用，不落盘）</label><input id="community" type="text" value="rwcommstr" placeholder="v1 / v2c community">
           </div>
@@ -525,10 +525,39 @@
       return api('/api/mibs',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-MIB-Filename':encodeURIComponent(f.name)},body:buf});
     }).then(function(d){
       $('mibId').value=d.mib.mib_id;
+      loadModules(d.mib.mib_id);
       toast('已生成 '+d.mib.case_count+' 条用例（'+d.mib.mib_id+'）'); refresh();
     }).catch(function(e){ toast('上传失败: '+e.message, true); })
       .finally(function(){ $('uploadBtn').disabled=false; });
   });
+
+  var modulesMibId = '';
+  function loadModules(mibId){
+    var sel = $('modules');
+    if(!mibId){
+      modulesMibId = '';
+      sel.innerHTML = '<option value="">全部模块</option>';
+      sel.disabled = true;
+      return;
+    }
+    if(modulesMibId === mibId && sel.options.length > 1) return;
+    modulesMibId = mibId;
+    sel.disabled = true;
+    api('/api/mibs/'+mibId+'/modules').then(function(d){
+      var opts = ['<option value="">全部模块</option>'];
+      (d.modules || []).forEach(function(m){
+        opts.push('<option value="'+esc(m.name)+'">'+esc(m.name)+'（'+m.node_count+' 节点）</option>');
+      });
+      sel.innerHTML = opts.join('');
+      sel.disabled = false;
+    }).catch(function(e){
+      modulesMibId = '';
+      sel.innerHTML = '<option value="">全部模块</option>';
+      sel.disabled = true;
+      toast('加载模块失败: '+e.message, true);
+    });
+  }
+  $('mibId').addEventListener('change', function(){ loadModules(this.value.trim()); });
 
   $('submitBtn').addEventListener('click', function(){
     var cred={}, version=$('version').value;
@@ -544,7 +573,7 @@
       mib_id:$('mibId').value.trim(), mode:'live',
       target_host:$('host').value.trim(), target_port:parseInt($('port').value||'161',10),
       version:version, limit: runAll ? 0 : limitVal,
-      modules:$('modules').value.split(',').map(function(s){return s.trim()}).filter(Boolean),
+      modules: $('modules').value ? [$('modules').value] : [],
       credential:cred
     };
     if(!body.mib_id){ toast('请先选择 MIB', true); return; }
@@ -773,6 +802,7 @@
       });
     } else {
       $('mibId').value = mibId;
+      loadModules(mibId);
     }
   });
   $('jobBody').addEventListener('click', function(e){

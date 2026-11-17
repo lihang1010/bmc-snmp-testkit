@@ -282,6 +282,41 @@ def create_app(
         except MibError as exc:
             raise HTTPException(404, str(exc)) from exc
 
+    @app.get("/api/mibs/{mib_id}/modules")
+    async def get_mib_modules(mib_id: str, request: Request):
+        """Top-level modules parsed from the MIB, for the job filter dropdown."""
+        require(request)
+        try:
+            path = library.model_path(mib_id)
+        except MibError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if not path.is_file():
+            raise HTTPException(404, "MIB 不存在")
+        try:
+            model = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise HTTPException(500, f"model.json 读取失败: {exc}") from exc
+        nodes = model.get("nodes") or []
+        root_oid = str(model.get("root_oid") or "")
+        root_name = next((n.get("name") for n in nodes if n.get("oid") == root_oid), "")
+        modules = []
+        for node in nodes:
+            if node.get("parent_name") != root_name or node.get("kind") != "group":
+                continue
+            oid = str(node.get("oid") or "")
+            if not oid:
+                continue
+            modules.append({
+                "name": node.get("name"),
+                "oid": oid,
+                "node_count": sum(
+                    1 for n in nodes
+                    if n.get("oid") == oid or str(n.get("oid") or "").startswith(oid + ".")
+                ),
+            })
+        modules.sort(key=lambda m: m["oid"])
+        return {"mib_id": mib_id, "root_oid": root_oid, "modules": modules}
+
     @app.get("/api/mibs/{mib_id}/warnings")
     async def get_mib_warnings(mib_id: str, request: Request):
         """Parse warnings + IMPORTS/strict-syntax info, so skipped nodes are visible."""

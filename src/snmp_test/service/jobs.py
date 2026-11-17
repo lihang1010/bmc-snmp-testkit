@@ -448,16 +448,34 @@ class JobRunner:
         # exactly (v1 has no normal GETBULK cases, so it must not consume a share).
         read_ops = ("GET", "GETNEXT", "GETBULK")
         case_store = self.library.load_cases(job.mib_id)
-        pools = {
-            op: case_store.select(CaseFilter(
+        # A selected module also covers walk cases: GETNEXT/GETBULK carry a
+        # synthetic "module:X" label, and table walks start at an OID below it.
+        module_prefixes = [
+            node.oid for name in job.modules
+            if (node := model.node_by_name(name)) is not None and node.oid
+        ]
+
+        def in_selected_module(case) -> bool:
+            if not job.modules:
+                return True
+            if case.module in job.modules:
+                return True
+            if case.module.startswith("module:") and case.module[7:] in job.modules:
+                return True
+            return any(
+                case.oid == prefix or case.oid.startswith(prefix + ".")
+                for prefix in module_prefixes
+            )
+
+        pools: dict[str, list] = {}
+        for op in read_ops:
+            selected = case_store.select(CaseFilter(
                 operations={op},
                 categories={"normal"},
                 versions={job.version},
-                modules=set(job.modules),
                 exclude_tags={"auth", "flood", "negative", "guarded", "blocked"},
             ))
-            for op in read_ops
-        }
+            pools[op] = [case for case in selected if in_selected_module(case)]
         ops = [op for op in read_ops if pools[op]]
         cases: list = []
         taken = {op: 0 for op in ops}
