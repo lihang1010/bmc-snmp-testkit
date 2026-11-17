@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from snmp_test.service.app import COOKIE, create_app
+from snmp_test.service.jobs import JobStore
 
 ROOT = Path(__file__).resolve().parents[1]
 MIB_BYTES = (ROOT / "TTY-T1ZDG-v1.0_20261026.mib").read_bytes()
@@ -237,6 +238,7 @@ def test_readonly_job_end_to_end(web):
     results = client.get(f"/runs/{run_id}/results.json", headers=_headers(alice)).json()
     ops_seen = {x["operation"] for x in results["results"]}
     assert ops_seen <= {"GET", "GETNEXT", "GETBULK"}, ops_seen
+    assert {"GET", "GETNEXT"} <= ops_seen, "the limit is shared by operation pools"
     assert "SET" not in ops_seen, "no write operation may be emitted by the service"
 
     # reports are private: another account and an anonymous client must not read them
@@ -254,6 +256,27 @@ def test_readonly_job_end_to_end(web):
         assert "never-store-this-secret" not in path.read_text(encoding="utf-8")
     snapshot = (root / "runs" / run_id / "config-snapshot.yaml").read_text(encoding="utf-8")
     assert "never-store-this-secret" not in snapshot
+
+
+def test_interrupted_job_is_persisted_as_failed(tmp_path):
+    root = tmp_path / "jobs-store"
+    store = JobStore(root)
+    job = store.create(
+        user=ALICE, mib_id="0" * 16, target_host="192.0.2.99", target_port=161,
+        version="v2c", mode="live", modules=(), limit=0,
+    )
+    job.status = "running"
+    job.progress = {"done": 750, "total": 7703, "passed": 632, "failed": 118}
+    store.update(job)
+
+    restarted = JobStore(root)
+    recovered = restarted.get(job.job_id)
+    assert recovered.status == "failed"
+    assert "interrupted" in recovered.message
+    assert recovered.progress["done"] == 750
+    last = json.loads(restarted.journal.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert last["status"] == "failed"
+    assert '"reason": "service_restart"' in restarted.audit.read_text(encoding="utf-8")
 
 
 def test_job_queue_is_private(web):

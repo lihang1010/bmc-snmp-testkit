@@ -113,16 +113,25 @@ class JobStore:
                     started_at=data.get("started_at"), finished_at=data.get("finished_at"),
                     run_id=data.get("run_id"), case_count=int(data.get("case_count", 0)),
                     summary=data.get("summary") or {}, message=data.get("message", ""),
+                    progress=data.get("progress") or {},
                 )
                 self._jobs[job.job_id] = job
             except Exception:
                 continue
         # Anything that was mid-flight when the process died is reported as failed.
         for job in self._jobs.values():
-            if job.status in ("queued", "running"):
+            if job.status in ("queued", "waiting", "running"):
                 job.status = "failed"
                 job.message = "interrupted by service restart"
                 job.finished_at = time.time()
+                # Persist the correction: otherwise the journal keeps claiming
+                # "running" and the UI resurrects a job that no longer exists.
+                self._append(job)
+                self.audit_log({
+                    "event": "job_failed", "job_id": job.job_id, "user": job.user,
+                    "mib_id": job.mib_id, "target": job.target_host, "mode": job.mode,
+                    "reason": "service_restart", "error": job.message,
+                })
 
     def create(self, **kwargs: Any) -> Job:
         job = Job(job_id=uuid.uuid4().hex[:12], **kwargs)
@@ -233,6 +242,19 @@ class JobRunner:
             except asyncio.TimeoutError:
                 task.cancel()
         self._tasks.clear()
+        # A shutdown can cancel a job mid-run; persist the interrupted state so
+        # the UI does not show a phantom "running" job after the next start.
+        for job in self.store.list(500):
+            if job.status in ("queued", "waiting", "running"):
+                job.status = "failed"
+                job.finished_at = time.time()
+                job.message = "interrupted by service shutdown"
+                self.store.update(job)
+                self.store.audit_log({
+                    "event": "job_failed", "job_id": job.job_id, "user": job.user,
+                    "mib_id": job.mib_id, "target": job.target_host, "mode": job.mode,
+                    "reason": "service_shutdown", "error": job.message,
+                })
 
     async def submit(self, job: Job) -> None:
         await self.queue.put(job)
@@ -438,21 +460,20 @@ class JobRunner:
         }
         ops = [op for op in read_ops if pools[op]]
         cases: list = []
-        if job.limit:
-            taken = {op: 0 for op in ops}
-            while len(cases) < job.limit:
-                progressed = False
-                for op in ops:
-                    if taken[op] < len(pools[op]):
-                        cases.append(pools[op][taken[op]])
-                        taken[op] += 1
-                        progressed = True
-                        if len(cases) >= job.limit:
-                            break
-                if not progressed:
+        taken = {op: 0 for op in ops}
+        while True:
+            if job.limit and len(cases) >= job.limit:
+                break
+            progressed = False
+            for op in ops:
+                if job.limit and len(cases) >= job.limit:
                     break
-        else:
-            cases = [case for op in ops for case in pools[op]]
+                if taken[op] < len(pools[op]):
+                    cases.append(pools[op][taken[op]])
+                    taken[op] += 1
+                    progressed = True
+            if not progressed:
+                break
         if not cases:
             raise ValueError("no read-only GET/GETNEXT/GETBULK cases matched the requested filters")
         job.case_count = len(cases)
@@ -464,10 +485,16 @@ class JobRunner:
         )
         run_id = f"web-{job.job_id}"
 
+        _last_flush = [0.0]
+
         def _on_progress(done: int, total: int, passed: int, failed: int) -> None:
-            # Live progress stays in memory only; the final summary is what gets
-            # persisted to the journal when the job finishes.
             job.progress = {"done": done, "total": total, "passed": passed, "failed": failed}
+            # Flush progress to the journal periodically: if the process dies
+            # mid-run, the last persisted line still shows how far it got.
+            now = time.time()
+            if done >= total or now - _last_flush[0] >= 10.0:
+                _last_flush[0] = now
+                self.store.update(job)
 
         evt = self._cancel.setdefault(job.job_id, asyncio.Event())
         runtime, _ = await run_batch(

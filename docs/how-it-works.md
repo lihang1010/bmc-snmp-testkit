@@ -358,6 +358,8 @@ GET /runs/{run_id}/report.html -> 带鉴权的静态报告
 
 每一步产物都在磁盘上：`work/mibs/<id>/cases.json` 是这次任务用的用例定义，`runs/web-<job_id>/pdus.jsonl` 是实际收发，`work/jobs/audit.jsonl` 记录谁在何时提交了什么。
 
+任务进度每 10 秒落盘一次；服务重启或中途退出时，`jobs.jsonl` 里仍在 `queued / waiting / running` 的任务会被改写为 `failed`（reason: `service_restart` / `service_shutdown`），不会在界面上留下永远「运行中」的幽灵任务。长任务请用 `nohup` / `tmux` / systemd 托管 Web 服务，避免终端关闭把进程一起带走。
+
 ### 11.3 多人场景的安全边界（与单人 CLI 的差异）
 
 | 约束 | CLI 单人版 | Web 多人版 |
@@ -374,7 +376,7 @@ GET /runs/{run_id}/report.html -> 带鉴权的静态报告
 
 ### 11.4 已验证与仍是 MVP 的部分
 
-已验证（全量 `pytest` 共 192 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
+已验证（全量 `pytest` 共 193 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
 
 仍是 MVP、生产前需替换：
 
