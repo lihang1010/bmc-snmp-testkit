@@ -98,7 +98,6 @@ function dashboard() {
     element('mibId').value = '0'.repeat(16);
     element('host').value = '192.0.2.1';
     element('modules').value = '';
-    element('runAll').checked = true;
     element('submitBtn').listeners.click();
     await settle();
   }

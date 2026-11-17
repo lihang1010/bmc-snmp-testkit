@@ -364,12 +364,10 @@
         <div class="form-grid">
           <div class="field"><label for="host">目标 IP</label><input id="host" placeholder="真实 BMC IP"></div>
           <div class="field"><label for="port">端口</label><input id="port" type="number" value="161"></div>
-          <div class="field"><label for="version">SNMP 版本</label><select id="version"><option>v1</option><option>v2c</option><option>v3</option></select></div>
-          <div class="field"><label for="limit">数量（前 N 条）</label><input id="limit" type="number" value="20" min="1" max="500"></div>
-          <div class="field span2"><label class="checkbox"><input type="checkbox" id="runAll"> 所选范围内全部用例（不限数量，可能耗时较长）</label></div>
           <div class="field"><label for="mibId">MIB ID</label><input id="mibId" placeholder="从左侧列表选择或粘贴"></div>
-          <div class="field"><label for="modules">模块</label><select id="modules" disabled><option value="">全部模块</option></select></div>
-          <div id="v1cred" class="span2">
+          <div class="field"><label for="modules">模块（范围）</label><select id="modules" disabled><option value="">全部模块</option></select></div>
+          <div class="field"><label for="version">SNMP 版本</label><select id="version"><option>v1</option><option>v2c</option><option>v3</option></select></div>
+          <div id="v1cred" class="field">
             <label for="community">团体字（仅在内存中使用，不落盘）</label><input id="community" type="text" value="rwcommstr" placeholder="v1 / v2c community">
           </div>
           <div id="v3cred" class="span2 hidden">
@@ -377,6 +375,7 @@
             <div class="row"><div class="field"><label for="v3auth">认证协议</label><select id="v3auth"><option>SHA</option><option>MD5</option><option>SHA256</option><option>NONE</option></select></div><div class="field"><label for="v3priv">加密协议</label><select id="v3priv"><option>AES128</option><option>DES</option><option>AES256</option><option>NONE</option></select></div></div>
             <div class="row"><div class="field"><label for="v3authkey">认证密钥</label><input id="v3authkey" type="password"></div><div class="field"><label for="v3privkey">加密密钥</label><input id="v3privkey" type="password"></div></div>
           </div>
+          <div class="span2"><span class="muted" style="font-size:11.5px">提交后执行所选范围内的全部只读用例；模块默认「全部模块」。</span></div>
         </div>
         <div class="form-actions"><button id="submitBtn" class="btn btn--primary">提交任务</button></div>
       </div>
@@ -566,13 +565,10 @@
             auth_protocol:$('v3auth').value, priv_protocol:$('v3priv').value,
             auth_key:$('v3authkey').value, priv_key:$('v3privkey').value};
     } else { cred={community:$('community').value}; }
-    var runAll = $('runAll').checked;
-    var limitVal = parseInt($('limit').value, 10);
-    if(!runAll && (!limitVal || limitVal < 1)){ toast('请填写有效的用例数量（≥1），或勾选「所选范围内全部用例」', true); return; }
     var body={
       mib_id:$('mibId').value.trim(), mode:'live',
       target_host:$('host').value.trim(), target_port:parseInt($('port').value||'161',10),
-      version:version, limit: runAll ? 0 : limitVal,
+      version:version, limit: 0,
       modules: $('modules').value ? [$('modules').value] : [],
       credential:cred
     };
@@ -592,7 +588,6 @@
       .catch(function(e){ toast('提交失败: '+e.message, true); })
       .finally(function(){ $('submitBtn').disabled=false; });
   });
-  $('runAll').addEventListener('change', function(){ $('limit').disabled = this.checked; });
 
   // ---- node / case viewer ----
   var viewerState = { mibId: '', tab: 'nodes', offset: 0, limit: 50,
