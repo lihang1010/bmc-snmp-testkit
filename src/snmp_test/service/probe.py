@@ -113,7 +113,9 @@ class ProbeService:
         self._mock_lock = asyncio.Lock()
         probe_cfg = self._probe_settings()
         self.concurrency = max(1, int(probe_cfg.get("concurrency", 4)))
-        self.rate_limit_ms = max(0.0, float(probe_cfg.get("rate_limit_ms", 0)))
+        # A small gap keeps long v1 GETNEXT walks from overwhelming BMC agents,
+        # which otherwise drop the occasional request mid-walk.
+        self.rate_limit_ms = max(0.0, float(probe_cfg.get("rate_limit_ms", 20)))
         self.timeout_s = max(0.1, float(probe_cfg.get("timeout_s", 5.0)))
         # BMC SNMP stacks occasionally drop a single packet during long walks;
         # one retransmission is cheap compared with losing the whole walk.
@@ -336,6 +338,7 @@ class ProbeService:
 
     async def _walk(
         self, session: SnmpSession, version: str, oid: str, cursor: str, limit: int,
+        host: str = "",
     ) -> tuple[list[Any], str, bool]:
         """Walk a subtree, using GETBULK on v2c/v3 to cut round trips by ~25x."""
         prefix = oid.lstrip(".")
@@ -343,6 +346,10 @@ class ProbeService:
         varbinds: list[Any] = []
         error = ""
         while len(varbinds) < limit:
+            # Pace the long v1 GETNEXT chain: a 200-row table is 200 packets,
+            # and BMC agents drop requests when they arrive back to back.
+            if host and varbinds:
+                await self._throttle(host)
             remaining = limit - len(varbinds)
             if version == "v1":
                 step = await session.get_next([walk_cursor])
@@ -457,7 +464,7 @@ class ProbeService:
                 # the last OID of the previous page, so the walk resumes exactly
                 # where it stopped instead of treating the last OID as a new root.
                 varbinds, error, truncated = await self._walk(
-                    session, version, oid, cursor, limit,
+                    session, version, oid, cursor, limit, host if mode == "live" else "",
                 )
             else:
                 if operation == "GET":

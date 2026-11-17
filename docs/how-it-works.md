@@ -367,14 +367,14 @@ GET /runs/{run_id}/report.html -> 带鉴权的静态报告
 | SET | 可用（有备份/还原/黑名单） | 批量任务不可达（只提交 GET/GETNEXT/GETBULK）；交互探测可用，需二次确认 + `hard_block` + 审计 |
 | 账号 | 无（单人或共享配置） | 邮箱注册 / 登录，所有账号权限一致（无角色） |
 | 凭据 | `config/config.yaml` 明文（输出脱敏） | 每次任务 / 探测时在内存注入，不写入任何文件 |
-| 并发 | 单进程按 `execution.concurrency`，live 单目标再受 `live_concurrency` / `request_interval_ms` 约束 | 默认 2 worker（上限 4），同一 live 目标串行；交互探测默认 4 并发（`probe.concurrency`），会话按目标+版本+凭据复用缓存 |
+| 并发 | 单进程按 `execution.concurrency`，live 单目标再受 `live_concurrency` / `request_interval_ms` 约束 | 默认 2 worker（上限 4），同一 live 目标串行；交互探测默认 4 并发（`probe.concurrency`）、请求间隔 20ms（`probe.rate_limit_ms`），会话按目标+版本+凭据复用缓存 |
 | MIB | 唯一全局 `cases/generated/` | 内容寻址的共享 MIB 库，每个 MIB 独立模型与用例 |
 | 报告 | 本地文件 | 带鉴权的 HTTP 路由，按账号隔离 |
 | 审计 | 运行目录日志 | `work/jobs/audit.jsonl` + `work/probe-audit.jsonl`，`/audit` 统一时间线 |
 
 ### 11.4 已验证与仍是 MVP 的部分
 
-已验证（全量 `pytest` 共 191 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
+已验证（全量 `pytest` 共 192 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
 
 仍是 MVP、生产前需替换：
 

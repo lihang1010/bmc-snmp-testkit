@@ -57,6 +57,25 @@ class _FakeSession:
                             varbinds=varbinds, version="v2c", operation="GETBULK", target="fake")
 
 
+def test_walk_paces_v1_steps(tmp_path: Path):
+    """Space out GETNEXT steps so long v1 walks do not overwhelm the agent."""
+    service = ProbeService(tmp_path, tmp_path / "web.yaml")
+    service.rate_limit_ms = 40
+
+    async def body():
+        # execute() throttles before the first request; _walk paces the rest.
+        await service._throttle("192.0.2.1")
+        started = time.monotonic()
+        varbinds, error, truncated = await service._walk(
+            _FakeSession(ROWS), "v1", ROOT_OID, "", 4, host="192.0.2.1",
+        )
+        elapsed = time.monotonic() - started
+        assert len(varbinds) == 4 and truncated is True and error == ""
+        assert elapsed >= 0.11  # three gaps between four steps
+
+    _run(body)
+
+
 def _run(body):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

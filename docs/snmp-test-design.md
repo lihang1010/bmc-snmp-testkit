@@ -309,7 +309,7 @@ case_id = "TC-" + sha256(
 
 - 解析 `O(L)`（L≈11k 行）；生成 `O(N·V·K)`，模型与用例以 JSON 缓存，惰性加载；
 - 每个「目标+版本」复用单一 SNMP Engine 与传输；GETBULK 限制 `max_repetitions`；只读用例并发、SET 串行；live 模式另有单目标并发上限（`execution.live_concurrency`，默认 4，0 表示不额外限制）与请求间隔（`execution.request_interval_ms`，默认 0），避免集中打满 BMC 的 SNMP 守护进程；
-- Web 交互探测：同一「目标+版本+凭据」的 `SnmpSession` 按 LRU 缓存复用（`probe.session_ttl_s` / `probe.session_cache_size`），WALK 在 v2c/v3 下用 GETBULK 批量拉取（v1 退回 GETNEXT），live 请求受 `probe.concurrency`（默认 4）与 `probe.rate_limit_ms`（默认 0）约束；批量任务与探测的超时分别由 `jobs.timeout_s` / `jobs.retries`（默认 5s / 1 次）和 `probe.timeout_s` / `probe.retries`（默认 5s / 1 次）控制；
+- Web 交互探测：同一「目标+版本+凭据」的 `SnmpSession` 按 LRU 缓存复用（`probe.session_ttl_s` / `probe.session_cache_size`），WALK 在 v2c/v3 下用 GETBULK 批量拉取（v1 退回 GETNEXT），live 请求受 `probe.concurrency`（默认 4）与 `probe.rate_limit_ms`（默认 20ms，作用于每次探测及 WALK 内部逐条请求，v1 长表 WALK 尤其需要）约束；批量任务与探测的超时分别由 `jobs.timeout_s` / `jobs.retries`（默认 5s / 1 次）和 `probe.timeout_s` / `probe.retries`（默认 5s / 1 次）控制；
 - `execution.oid_baseline`（CLI `--oid-baseline`）可在 live 运行前按目标 WALK 一次企业根，把不在基线中的 GET 实例直接判 `unsupported`，避免为未实现 OID 反复等待超时；WALK 失败时自动退化为正常执行；
 - 统一错误归一化、`SafetyAbort` 快速失败、PDU 日志采样与大小截断，避免日志膨胀；
 - 平台：使用 `pathlib`、UTF-8 容错读取、统一 CRLF；Windows 默认 Proactor 事件循环，不依赖 `fork`；

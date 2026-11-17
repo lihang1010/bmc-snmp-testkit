@@ -38,7 +38,7 @@
 #   timeout_s: 5                # 单次请求超时（秒）
 #   retries: 1                  # 偶发丢包时重发一次；0 = 不重试
 #   concurrency: 4              # live 探测最大并发请求数
-#   rate_limit_ms: 0            # 同一目标两次请求的最小间隔（毫秒）；0 = 不限速
+#   rate_limit_ms: 20           # 同一目标两次请求的最小间隔（毫秒），也作用于 WALK 内部；0 = 不限速
 #   session_ttl_s: 300          # 空闲会话保留时间，超时后关闭
 #   session_cache_size: 16      # 最多缓存的会话数，超出按 LRU 关闭最久未用的
 
