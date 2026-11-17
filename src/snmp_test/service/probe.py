@@ -293,7 +293,11 @@ class ProbeService:
             agent_overrides["mode"] = "mock"
             cfg = load_config(self.config_path, overrides=agent_overrides)
             agent = MockAgent(model, cfg)
-            await agent.start()
+            try:
+                await agent.start()
+            except BaseException:
+                await agent.stop()
+                raise
             self._agent = agent
             self._agent_mib_id = mib_id
 

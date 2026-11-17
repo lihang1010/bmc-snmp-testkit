@@ -120,7 +120,7 @@ class Runtime:
         cases: list[TestCase],
         *,
         dry_run: bool = False,
-        on_progress: Callable[[int, int, int, int], None] | None = None,
+        on_progress: Callable[[int, int, int, int, int], None] | None = None,
         cancel_event: asyncio.Event | None = None,
     ) -> list[CaseResult]:
         self.dry_run = dry_run
@@ -138,6 +138,7 @@ class Runtime:
         self._progress_done = 0
         self._progress_passed = 0
         self._progress_failed = 0
+        self._progress_unsupported = 0
         baseline_results: list[CaseResult] = []
         if self.oid_baseline and not dry_run:
             pairs, baseline_results = await self._apply_baseline(pairs, cancel_event=cancel_event)
@@ -161,9 +162,14 @@ class Runtime:
         self._progress_done += 1
         if result.status == "passed":
             self._progress_passed += 1
-        elif result.status in ("failed", "error", "unsupported"):
+        elif result.status == "unsupported":
+            self._progress_unsupported += 1
+        elif result.status in ("failed", "error"):
             self._progress_failed += 1
-        cb(self._progress_done, self._progress_total, self._progress_passed, self._progress_failed)
+        cb(
+            self._progress_done, self._progress_total, self._progress_passed,
+            self._progress_failed, self._progress_unsupported,
+        )
 
     async def _apply_baseline(
         self,
@@ -588,7 +594,7 @@ async def run_batch(
     readonly_only: bool | None = None,
     security: SecurityPolicy | None = None,
     dry_run: bool = False,
-    on_progress: Callable[[int, int, int, int], None] | None = None,
+    on_progress: Callable[[int, int, int, int, int], None] | None = None,
     cancel_event: asyncio.Event | None = None,
 ) -> tuple[Runtime, list[CaseResult]]:
     """Convenience entry point: start resources, run, stop, return results."""
@@ -597,11 +603,16 @@ async def run_batch(
         allow_guarded=allow_guarded, enable_set=enable_set,
         allow_live=allow_live, readonly_only=readonly_only, security=security,
     )
-    await runtime.start()
     try:
-        results = await runtime.run(
-            cases, dry_run=dry_run, on_progress=on_progress, cancel_event=cancel_event,
-        )
-    finally:
-        await runtime.stop()
+        try:
+            await runtime.start()
+            results = await runtime.run(
+                cases, dry_run=dry_run, on_progress=on_progress, cancel_event=cancel_event,
+            )
+        finally:
+            await runtime.stop()
+    except BaseException:
+        # On success the caller writes reports before closing; on failure nobody will.
+        runtime.close()
+        raise
     return runtime, results

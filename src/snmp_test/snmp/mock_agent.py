@@ -275,12 +275,19 @@ class MockAgent:
 
     async def stop(self) -> None:
         engines = [self.engine, *self.notify_engines]
+        self.notify_engines.clear()
         for eng in engines:
+            dispatcher = getattr(eng, "transport_dispatcher", None)
+            if dispatcher is None:
+                continue
+            # Notification engines never call job_started(), so job_finished()
+            # raises for them; close the socket regardless.
             try:
-                dispatcher = getattr(eng, "transport_dispatcher", None)
-                if dispatcher is not None:
-                    dispatcher.job_finished(1)
-                    dispatcher.close_dispatcher()
+                dispatcher.job_finished(1)
+            except Exception:
+                pass
+            try:
+                dispatcher.close_dispatcher()
             except Exception:
                 pass
 

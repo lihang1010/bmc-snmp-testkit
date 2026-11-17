@@ -158,7 +158,7 @@ def test_run_batch_cancel(tmp_path: Path):
     assert len(cases) >= 51, len(cases)  # spans more than one batch (chunk=50)
     evt = asyncio.Event()
 
-    def cb(done, total, passed, failed):
+    def cb(done, total, passed, failed, unsupported):
         evt.set()  # request cancellation as soon as the first case finishes
 
     async def body():

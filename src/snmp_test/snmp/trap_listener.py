@@ -164,14 +164,20 @@ class TrapListener:
         return self
 
     async def stop(self) -> None:
+        dispatcher = getattr(self.engine, "transport_dispatcher", None)
+        if dispatcher is None:
+            return
+        # job_finished raises if start() failed before job_started(); the socket
+        # must still be closed.
         try:
-            dispatcher = getattr(self.engine, "transport_dispatcher", None)
-            if dispatcher is not None:
-                dispatcher.job_finished(1)
-                dispatcher.close_dispatcher()
-                await asyncio.sleep(0)
+            dispatcher.job_finished(1)
         except Exception:
             pass
+        try:
+            dispatcher.close_dispatcher()
+        except Exception:
+            pass
+        await asyncio.sleep(0)
 
     # ------------------------------------------------------------ credentials
     def _add_community(self, index: str, community: str) -> None:

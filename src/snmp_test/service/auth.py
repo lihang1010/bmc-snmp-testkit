@@ -23,6 +23,8 @@ import smtplib
 import sqlite3
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from email.message import EmailMessage
 from pathlib import Path
@@ -122,11 +124,14 @@ class AuthService:
         self._init_db()
 
     # ---------------------------------------------------------------- storage
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        # SQLite's transaction context does not close the connection.
+        with closing(sqlite3.connect(self.db_path, timeout=10)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            with conn:
+                yield conn
 
     def _init_db(self) -> None:
         with self._lock, self._connect() as conn:

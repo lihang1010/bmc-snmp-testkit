@@ -475,7 +475,11 @@
     opts = opts || {};
     opts.credentials = 'same-origin';
     return fetch(path, opts).then(function(r){
-      if(!r.ok){ return r.json().then(function(d){throw new Error(d.detail || ('HTTP '+r.status))}); }
+      if(!r.ok){ return r.json().then(function(d){
+        var error = new Error(d.detail || ('HTTP '+r.status));
+        error.status = r.status;
+        throw error;
+      }); }
       return r.json();
     });
   }
@@ -555,7 +559,7 @@
     }
     $('submitBtn').disabled=true;
     api('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-      .then(function(d){ toast('任务已入队: '+d.job.job_id); refresh(); setTimeout(refresh, 1500); })
+      .then(function(d){ toast('任务已入队: '+d.job.job_id); refresh(); })
       .catch(function(e){ toast('提交失败: '+e.message, true); })
       .finally(function(){ $('submitBtn').disabled=false; });
   });
@@ -910,16 +914,22 @@
     return '<span class="status status--'+cls+'">'+esc(STATUS_LABEL[s] || s)+'</span>';
   }
 
+  var refreshTimer = null, refreshing = false, refreshAgain = false, sessionExpired = false;
   function refresh(){
-    api('/api/session').then(function(d){
+    clearTimeout(refreshTimer);
+    if(sessionExpired) return;
+    if(refreshing){ refreshAgain = true; return; }
+    refreshing = true;
+    refreshAgain = false;
+    var pending = false;
+    var controller = new AbortController();
+    var timeout = setTimeout(function(){ controller.abort(); }, 10000);
+    var options = {signal: controller.signal};
+    return api('/api/session', options).then(function(d){
       $('userBox').textContent = d.user;
       $('userEmail').textContent = d.user;
-    }).catch(function(){
-      location.href='/login';
-      return null;
-    }).then(function(ok){
-      if(ok===null) return;
-      api('/api/config').then(function(c){
+      return Promise.all([
+      api('/api/config', options).then(function(c){
         $('cap').innerHTML='<span class="cap-item">操作 <b>GET</b></span>'+
           '<span class="cap-item">live <b class="ok">内网直连</b></span>'+
           '<span class="cap-item">审计 <b class="ok">已开启</b></span>'+
@@ -927,8 +937,8 @@
           '<span class="cap-item">队列 <b>'+esc(c.queue_length)+'</b></span>'+
           '<span class="cap-item">MIB <b>'+esc(c.mib_count)+'</b></span>'+
           '<span class="cap-item">任务 <b>'+esc(c.job_count)+'</b></span>';
-      }).catch(function(){});
-      api('/api/mibs').then(function(d){
+      }).catch(function(){}),
+      api('/api/mibs', options).then(function(d){
         if(!d.mibs.length){ $('mibBody').innerHTML='<tr><td colspan="5" class="muted">暂无 MIB，请先上传</td></tr>'; return; }
         $('mibBody').innerHTML=d.mibs.map(function(m){
           return '<tr><td><code>'+esc(m.mib_id)+'</code></td><td>'+esc(m.filename)+'<br><span class="muted">'+esc(m.module_name)+'</span></td>'+
@@ -940,10 +950,9 @@
             '<button class="btn btn--danger btn--sm" data-action="delete-mib" data-mib-id="'+esc(m.mib_id)+'" data-filename="'+esc(m.filename)+'">删除</button>'+
             '</td></tr>';
         }).join('');
-      }).catch(function(e){ toast('加载 MIB 失败: '+e.message, true); });
-      api('/api/jobs').then(function(d){
+      }).catch(function(e){ toast('加载 MIB 失败: '+e.message, true); }),
+      api('/api/jobs', options).then(function(d){
         if(!d.jobs.length){ $('jobBody').innerHTML='<tr><td colspan="7" class="muted">暂无任务</td></tr>'; return; }
-        var pending=false;
         $('jobBody').innerHTML=d.jobs.map(function(j){
           if(j.status==='queued'||j.status==='waiting'||j.status==='running') pending=true;
           var p=j.progress||{}, s=j.summary||{}, rate=s.effective_pass_rate==null?0:s.effective_pass_rate;
@@ -959,7 +968,7 @@
           } else if(p.total){
             var pct=Math.round(p.done/p.total*100);
             result = '<div class="pbar"><div class="pbar-fill" style="width:'+pct+'%"></div></div>'+
-              '<div class="psub">'+p.done+'/'+p.total+' · 通过 <b>'+p.passed+'</b> · 失败 <b>'+p.failed+'</b></div>';
+              '<div class="psub">'+p.done+'/'+p.total+' · 通过 <b>'+p.passed+'</b> · 失败 <b>'+p.failed+'</b> · 未实现 <b>'+(p.unsupported||0)+'</b></div>';
           } else if(j.status==='waiting'){
             result = '<span class="muted">等待目标释放…</span>';
           } else if(j.status==='queued'){
@@ -981,13 +990,23 @@
             '<td>'+statusCell(j.status)+'</td><td>'+result+'</td><td>'+report+'</td>'+
             '<td class="actions">'+actions+'</td></tr>';
         }).join('');
-        if(pending) setTimeout(refresh, 2000);
-      }).catch(function(e){ toast('加载任务失败: '+e.message, true); });
+      }).catch(function(e){ toast('加载任务失败: '+e.message, true); })
+      ]);
+    }).catch(function(e){
+      if(e.status === 401){
+        sessionExpired = true;
+        location.href = '/login';
+      } else {
+        toast('页面刷新失败，将自动重试: '+e.message, true);
+      }
+    }).finally(function(){
+      clearTimeout(timeout);
+      refreshing = false;
+      if(!sessionExpired) refreshTimer = setTimeout(refresh, refreshAgain ? 0 : (pending ? 2000 : 8000));
     });
   }
 
   refresh();
-  setInterval(refresh, 8000);
 })();
 </script>
 </body>

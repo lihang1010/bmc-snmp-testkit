@@ -330,6 +330,9 @@ class TransportPool:
             return probe
 
     async def close(self) -> None:
-        for session in self._sessions.values():
+        # Hold the lock so a session still opening is not left behind unowned.
+        async with self._lock:
+            sessions = list(self._sessions.values())
+            self._sessions.clear()
+        for session in sessions:
             await session.close()
-        self._sessions.clear()

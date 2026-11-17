@@ -487,8 +487,11 @@ class JobRunner:
 
         _last_flush = [0.0]
 
-        def _on_progress(done: int, total: int, passed: int, failed: int) -> None:
-            job.progress = {"done": done, "total": total, "passed": passed, "failed": failed}
+        def _on_progress(done: int, total: int, passed: int, failed: int, unsupported: int) -> None:
+            job.progress = {
+                "done": done, "total": total, "passed": passed,
+                "failed": failed, "unsupported": unsupported,
+            }
             # Flush progress to the journal periodically: if the process dies
             # mid-run, the last persisted line still shows how far it got.
             now = time.time()

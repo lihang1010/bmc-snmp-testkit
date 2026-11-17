@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -110,6 +111,15 @@ def web(tmp_path_factory):
         alice = _register(client, ALICE)
         bob = _register(client, BOB)
         yield client, root, app, alice, bob
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for dashboard JS tests")
+def test_dashboard_polling():
+    result = subprocess.run(
+        [shutil.which("node"), "--test", str(ROOT / "tests" / "test_dashboard_polling.cjs")],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_health_and_authentication(web):
