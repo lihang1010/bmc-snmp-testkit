@@ -129,6 +129,8 @@ def test_health_and_authentication(web):
         assert client.get("/api/mibs").status_code == 401
     assert client.get("/api/mibs", headers=_headers("bogus")).status_code == 401
     assert client.get("/api/mibs", headers=_headers(alice)).status_code == 200
+    cfg = client.get("/api/config", headers=_headers(alice)).json()
+    assert cfg["job_timeout_s"] == 5.0 and cfg["job_retries"] == 2
 
     r = client.post("/api/auth/login", json={"email": ALICE, "password": PASSWORD, "method": "password"})
     assert r.status_code == 200 and r.json()["user"] == ALICE

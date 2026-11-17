@@ -120,6 +120,26 @@ def test_sentinel_enum_is_not_a_closed_domain(model):
     assert {"kind": "value_in", "allowed": [1, 2, 3]} in value_assertions(enum_syntax)
 
 
+def test_enum_assertions_follow_description_and_table_defaults(model):
+    # DESCRIPTION documents 0 as legal ("0 for without ...").
+    auth = model.node_by_name("bmcSNMPV3UserAuthProto")
+    kinds = [a for a in value_assertions(auth.syntax, kind=auth.kind) if a["kind"] == "value_in"]
+    assert kinds == [{"kind": "value_in", "allowed": [0, 1, 2, 3, 4, 5]}]
+    priv = model.node_by_name("bmcSNMPV3UserPrivProto")
+    assert [a for a in value_assertions(priv.syntax, kind=priv.kind) if a["kind"] == "value_in"] == [
+        {"kind": "value_in", "allowed": [0, 1, 2]}
+    ]
+
+    # Table columns may return 0 for an unconfigured row, even when the enum
+    # block omits it; scalars keep the strict domain.
+    snmp_type = model.node_by_name("bmcSNMPTYPE")
+    assert [a for a in value_assertions(snmp_type.syntax, kind=snmp_type.kind) if a["kind"] == "value_in"] == [
+        {"kind": "value_in", "allowed": [0, 3]}
+    ]
+    strict = model.node_by_name("snmptrapSeverity").syntax
+    assert {"kind": "value_in", "allowed": [1, 2, 3]} in value_assertions(strict)
+
+
 def test_trap_case_generation(tmp_path: Path, model):
     cfg = tmp_path / "trap.yaml"
     cfg.write_text(

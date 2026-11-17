@@ -128,7 +128,7 @@ def invalid_values(syntax: SyntaxSpec | None) -> list[ValueSpec]:
         out.append(ValueSpec("OctetString", "not-an-integer", "wrong_type", valid=False))
         if syntax:
             if syntax.enum and not is_sentinel_enum(syntax):
-                used = set(syntax.enum.values())
+                used = set(syntax.legal_enum_values)
                 candidate = max(used) + 1 if used else 1
                 out.append(ValueSpec("Integer32", candidate, "enum_out_of_set", valid=False))
             if syntax.ranges:
@@ -160,8 +160,14 @@ def is_sentinel_enum(syntax: SyntaxSpec | None) -> bool:
     return len(values) == 1 and values[0] < 0
 
 
-def value_assertions(syntax: SyntaxSpec | None) -> list[dict[str, Any]]:
-    """Declarative assertions used for a normal GET response."""
+def value_assertions(
+    syntax: SyntaxSpec | None, *, kind: str = "",
+) -> list[dict[str, Any]]:
+    """Declarative assertions used for a normal GET response.
+
+    ``kind`` lets table columns accept 0 as the vendor "not configured" value;
+    scalars stay strict.
+    """
     assertions: list[dict[str, Any]] = [
         {"kind": "no_error"},
         {"kind": "varbind_count", "min": 1},
@@ -172,7 +178,10 @@ def value_assertions(syntax: SyntaxSpec | None) -> list[dict[str, Any]]:
     if syntax.is_integer:
         sentinel = is_sentinel_enum(syntax)
         if syntax.enum and not sentinel:
-            assertions.append({"kind": "value_in", "allowed": list(syntax.enum_values)})
+            allowed = list(syntax.legal_enum_values)
+            if kind == "column" and 0 not in allowed:
+                allowed = sorted([*allowed, 0])
+            assertions.append({"kind": "value_in", "allowed": allowed})
         for lo, hi in syntax.ranges:
             assertions.append({"kind": "value_in_range", "min": lo, "max": hi})
         if not syntax.ranges and (not syntax.enum or sentinel):

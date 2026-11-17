@@ -37,6 +37,9 @@ STATUS_RE = re.compile(r"\bSTATUS\s+([A-Za-z][A-Za-z0-9-]*)", re.I)
 DESCRIPTION_RE = re.compile(r'\bDESCRIPTION\s*"([\s\S]*?)"', re.I)
 INDEX_RE = re.compile(r"\bINDEX\s*\{([\s\S]*?)\}", re.I)
 ENUM_ITEM_RE = re.compile(rf"({NAME})\s*\(\s*(-?\d+)\s*\)")
+# Vendor MIBs often document extra legal values only in the prose, e.g.
+# "0 for without authentication protocol" next to an enum that lists 1..5.
+DOCUMENTED_ENUM_VALUE_RE = re.compile(r"(?<![\w.])(-?\d+)\s+for\b", re.I)
 RANGE_RE = re.compile(r"\(\s*(-?\d+)\s*\.\.\s*(-?\d+)\s*\)")
 SIZE_RE = re.compile(r"SIZE\s*\(\s*(\d+)\s*\.\.\s*(\d+)\s*\)", re.I)
 MEMBER_RE = re.compile(rf"^\s*({NAME})\s+({NAME})\s*,?\s*$")
@@ -166,6 +169,16 @@ def _parse_syntax(raw: str) -> dict[str, Any]:
     }
 
 
+def _documented_enum_values(enum: dict[str, int] | None, description: str) -> list[int]:
+    if not enum or not description:
+        return []
+    declared = set(enum.values())
+    return sorted({
+        int(m.group(1)) for m in DOCUMENTED_ENUM_VALUE_RE.finditer(description)
+        if int(m.group(1)) not in declared
+    })
+
+
 def _parse_object_block(name: str, kind: str, lines: list[tuple[int, str]]) -> RawDefinition | None:
     text = "\n".join(code for _, code in lines)
     first_line = lines[0][0] if lines else 0
@@ -185,6 +198,7 @@ def _parse_object_block(name: str, kind: str, lines: list[tuple[int, str]]) -> R
 
     syntax_raw = syntax_match.group(1).strip() if syntax_match else ""
     syntax = _parse_syntax(syntax_raw) if syntax_raw else None
+    description = " ".join((desc_match.group(1) if desc_match else "").split())
 
     return RawDefinition(
         name=name,
@@ -195,7 +209,7 @@ def _parse_object_block(name: str, kind: str, lines: list[tuple[int, str]]) -> R
         syntax_raw=syntax["raw"] if syntax else "",
         access=(access_match.group(1).lower() if access_match else "read-only"),
         status=(status_match.group(1).lower() if status_match else "current"),
-        description=" ".join((desc_match.group(1) if desc_match else "").split()),
+        description=description,
         index_names=index_names,
     )
 
@@ -271,7 +285,12 @@ class MibParser:
                     parsed = _parse_object_block(name, kind, block)
                     if parsed:
                         # recover the syntax dict via a second, cheap parse
-                        syntax_parsed[name] = _parse_syntax(parsed.syntax_raw) if parsed.syntax_raw else None
+                        sp = _parse_syntax(parsed.syntax_raw) if parsed.syntax_raw else None
+                        if sp is not None and sp.get("enum"):
+                            extra = _documented_enum_values(sp["enum"], parsed.description)
+                            if extra:
+                                sp["enum_documented"] = extra
+                        syntax_parsed[name] = sp
                         definitions.append(parsed)
                 i = j
                 continue
@@ -407,6 +426,18 @@ class MibParser:
                             "message": (
                                 f"'{d.name}' declares a single negative enum value "
                                 f"({enum_vals[0]}); treated as a sentinel, not a closed domain"
+                            ),
+                        }
+                    )
+                extra = list(sp.get("enum_documented") or [])
+                if extra:
+                    warnings.append(
+                        {
+                            "line": str(d.source_line),
+                            "code": "ENUM_DOCUMENTED_EXTRA",
+                            "message": (
+                                f"'{d.name}' DESCRIPTION documents extra legal value(s) "
+                                f"{extra} not present in the enum block"
                             ),
                         }
                     )

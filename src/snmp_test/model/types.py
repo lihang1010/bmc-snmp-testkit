@@ -38,6 +38,8 @@ class SyntaxSpec:
 
     base_type: str = "OCTET STRING"
     enum: dict[str, int] = field(default_factory=dict)
+    # Legal values documented only in DESCRIPTION (e.g. "0 for without ...")
+    enum_documented: tuple[int, ...] = ()
     ranges: tuple[tuple[int, int], ...] = ()
     size: tuple[int, int] | None = None
     raw: str = ""
@@ -63,6 +65,11 @@ class SyntaxSpec:
     def enum_values(self) -> tuple[int, ...]:
         return tuple(sorted(set(self.enum.values())))
 
+    @property
+    def legal_enum_values(self) -> tuple[int, ...]:
+        """Declared values plus values the DESCRIPTION documents as legal."""
+        return tuple(sorted(set(self.enum.values()) | set(self.enum_documented)))
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -73,6 +80,7 @@ class SyntaxSpec:
         return cls(
             base_type=str(data.get("base_type", "OCTET STRING")),
             enum={str(k): int(v) for k, v in (data.get("enum") or {}).items()},
+            enum_documented=tuple(int(v) for v in (data.get("enum_documented") or ())),
             ranges=_tuples(data.get("ranges")),
             size=tuple(data["size"]) if data.get("size") else None,
             raw=str(data.get("raw", "")),

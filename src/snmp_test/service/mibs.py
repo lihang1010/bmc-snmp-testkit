@@ -27,7 +27,7 @@ MIB_ID_RE = re.compile(r"^[0-9a-f]{16}$")
 MAX_MIB_BYTES = 4 * 1024 * 1024
 # Bumped whenever generated cases change shape, so cached ``cases.json`` from an
 # older release is rebuilt on next use instead of silently keeping stale assertions.
-GENERATOR_CACHE_VERSION = 2
+GENERATOR_CACHE_VERSION = 3
 
 
 class MibError(ValueError):

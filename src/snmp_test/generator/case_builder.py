@@ -124,7 +124,7 @@ class CaseBuilder:
         for inst in instances:
             readable = inst.access in ("read-only", "read-write")
             assertions = (
-                value_assertions(inst.syntax)
+                value_assertions(inst.syntax, kind=inst.kind)
                 + [{"kind": "oid_equals", "oid": inst.oid}]
                 if readable
                 else [{"kind": "rejected"}]
@@ -140,7 +140,7 @@ class CaseBuilder:
                     payload={
                         "varbinds": [_varbind(inst.oid)],
                         "node_name": inst.node_name,
-                        "expected_types": value_assertions(inst.syntax),
+                        "expected_types": value_assertions(inst.syntax, kind=inst.kind),
                     },
                     expectation={"assertions": assertions},
                     module=inst.module,

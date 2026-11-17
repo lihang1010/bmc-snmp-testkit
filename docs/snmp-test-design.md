@@ -115,7 +115,7 @@ flowchart TB
 
 `SYNTAX` 提取用「直到下一个关键字或 `::=` 为止」的跨行正则，因此枚举块与 range 都不会被截断：
 
-- 枚举：`([A-Za-z][\w-]*)\s*\(\s*(-?\d+)\s*\)`，兼容负数 `NA(-1)` 与连字符名；只有一个负值的枚举（如 `Integer32 { NA(-1) }`）视为哨兵而非封闭域，记 `SENTINEL_ENUM` 告警，运行时只断言 INT32 范围；
+- 枚举：`([A-Za-z][\w-]*)\s*\(\s*(-?\d+)\s*\)`，兼容负数 `NA(-1)` 与连字符名；只有一个负值的枚举（如 `Integer32 { NA(-1) }`）视为哨兵而非封闭域，记 `SENTINEL_ENUM` 告警，运行时只断言 INT32 范围；DESCRIPTION 中形如 `0 for without ...` 的补充合法值会并入断言，并记 `ENUM_DOCUMENTED_EXTRA` 告警；
 - 范围：`\((-?\d+)\.\.(-?\d+)\)`；
 - SIZE：显式 `SIZE(a..b)`；否则 `DisplayString` 按 RFC1213-MIB 补 `0..255`，`IpAddress` 按 4 字节补 `4..4`。
 
@@ -162,6 +162,7 @@ case_id = "TC-" + sha256(
 | SYNTAX | 合法值 | 边界值 | 非法值 |
 | --- | --- | --- | --- |
 | `Integer32` + 枚举 | 首个枚举值 / 另一枚举值 | 全部枚举值 | 错类型 `OctetString`、超出枚举集合 |
+| `Integer32` + 枚举（表列） | 同上；另允许 `0`（未配置） | 同左 | 错类型、超出枚举集合（不含 0） |
 | `Integer32` + 单负值哨兵枚举 | 按 INT32 取值 | — | 错类型（不生成「超出枚举集合」） |
 | `Integer32` + 范围 | 下界 / 另一合法值 | 下界、上界 | 错类型、上界+1、下界-1 |
 | 纯 `Integer32` | 0 / 1 | INT32_MIN、INT32_MAX | 错类型 |
@@ -309,7 +310,7 @@ case_id = "TC-" + sha256(
 
 - 解析 `O(L)`（L≈11k 行）；生成 `O(N·V·K)`，模型与用例以 JSON 缓存，惰性加载；
 - 每个「目标+版本」复用单一 SNMP Engine 与传输；GETBULK 限制 `max_repetitions`；只读用例并发、SET 串行；live 模式另有单目标并发上限（`execution.live_concurrency`，默认 4，0 表示不额外限制）与请求间隔（`execution.request_interval_ms`，默认 0），避免集中打满 BMC 的 SNMP 守护进程；
-- Web 交互探测：同一「目标+版本+凭据」的 `SnmpSession` 按 LRU 缓存复用（`probe.session_ttl_s` / `probe.session_cache_size`），WALK 在 v2c/v3 下用 GETBULK 批量拉取（v1 退回 GETNEXT），live 请求受 `probe.concurrency`（默认 4）与 `probe.rate_limit_ms`（默认 20ms，作用于每次探测及 WALK 内部逐条请求，v1 长表 WALK 尤其需要）约束；批量任务与探测的超时分别由 `jobs.timeout_s` / `jobs.retries`（默认 5s / 1 次）和 `probe.timeout_s` / `probe.retries`（默认 5s / 1 次）控制；
+- Web 交互探测：同一「目标+版本+凭据」的 `SnmpSession` 按 LRU 缓存复用（`probe.session_ttl_s` / `probe.session_cache_size`），WALK 在 v2c/v3 下用 GETBULK 批量拉取（v1 退回 GETNEXT），live 请求受 `probe.concurrency`（默认 4）与 `probe.rate_limit_ms`（默认 20ms，作用于每次探测及 WALK 内部逐条请求，v1 长表 WALK 尤其需要）约束；批量任务与探测的超时分别由 `jobs.timeout_s` / `jobs.retries`（默认 5s / 2 次）和 `probe.timeout_s` / `probe.retries`（默认 5s / 1 次）控制；
 - `execution.oid_baseline`（CLI `--oid-baseline`）可在 live 运行前按目标 WALK 一次企业根，把不在基线中的 GET 实例直接判 `unsupported`，避免为未实现 OID 反复等待超时；WALK 失败时自动退化为正常执行；
 - 统一错误归一化、`SafetyAbort` 快速失败、PDU 日志采样与大小截断，避免日志膨胀；
 - 平台：使用 `pathlib`、UTF-8 容错读取、统一 CRLF；Windows 默认 Proactor 事件循环，不依赖 `fork`；

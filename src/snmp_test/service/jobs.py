@@ -204,7 +204,7 @@ class JobRunner:
         self.policy = WebPolicy.from_security(self.web_security)
         settings = self._job_settings()
         self.timeout_s = max(0.1, float(settings.get("timeout_s", 5.0)))
-        self.retries = max(0, int(settings.get("retries", 1)))
+        self.retries = max(0, int(settings.get("retries", 2)))
         self.probe = probe
         self.queue: asyncio.Queue[Job | None] = asyncio.Queue()
         self.workers = max(1, min(int(workers), MAX_WORKERS))

@@ -66,6 +66,16 @@ def test_single_negative_enum_is_reported_as_sentinel(model):
     assert any("cpuCoreCount" in w["message"] for w in hits), hits
 
 
+def test_description_documented_enum_values_are_reported(model):
+    auth = model.node_by_name("bmcSNMPV3UserAuthProto").syntax
+    priv = model.node_by_name("bmcSNMPV3UserPrivProto").syntax
+    assert auth.enum_documented == (0,) and priv.enum_documented == (0,)
+    assert auth.legal_enum_values == (0, 1, 2, 3, 4, 5)
+    hits = [w for w in model.warnings if w["code"] == "ENUM_DOCUMENTED_EXTRA"]
+    assert any("bmcSNMPV3UserAuthProto" in w["message"] for w in hits), hits
+    assert any("bmcSNMPV3UserPrivProto" in w["message"] for w in hits), hits
+
+
 def test_commented_definitions_are_excluded(model):
     for name in ("platformInfo", "meVersion", "kvmMouseSetting", "powerConf", "eepromControl"):
         assert model.node_by_name(name) is None

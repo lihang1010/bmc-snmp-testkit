@@ -35,6 +35,7 @@ def _syntax_from_parsed(parsed: dict[str, Any] | None) -> SyntaxSpec | None:
     return SyntaxSpec(
         base_type=str(parsed.get("base_type", "OCTET STRING")),
         enum={str(k): int(v) for k, v in (parsed.get("enum") or {}).items()},
+        enum_documented=tuple(int(v) for v in (parsed.get("enum_documented") or ())),
         ranges=tuple((int(a), int(b)) for a, b in (parsed.get("ranges") or ())),
         size=tuple(parsed["size"]) if parsed.get("size") else None,
         raw=str(parsed.get("raw", "")),
