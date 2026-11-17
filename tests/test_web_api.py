@@ -512,7 +512,7 @@ def test_snmp_probe(web):
     assert caps["mock_set"] is True and caps["live_set"] is True
     assert caps["audit_enabled"] is True
     assert caps["session_cache_size"] >= 1
-    assert caps["probe_timeout_s"] == 5.0 and caps["probe_retries"] == 0
+    assert caps["probe_timeout_s"] == 5.0 and caps["probe_retries"] == 1
 
     base = {"mode": "mock", "version": "v1"}
     got = client.post(

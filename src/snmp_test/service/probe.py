@@ -115,7 +115,9 @@ class ProbeService:
         self.concurrency = max(1, int(probe_cfg.get("concurrency", 4)))
         self.rate_limit_ms = max(0.0, float(probe_cfg.get("rate_limit_ms", 0)))
         self.timeout_s = max(0.1, float(probe_cfg.get("timeout_s", 5.0)))
-        self.retries = max(0, int(probe_cfg.get("retries", 0)))
+        # BMC SNMP stacks occasionally drop a single packet during long walks;
+        # one retransmission is cheap compared with losing the whole walk.
+        self.retries = max(0, int(probe_cfg.get("retries", 1)))
         self.session_ttl = max(1.0, float(probe_cfg.get("session_ttl_s", 300)))
         self.session_cache_size = max(1, int(probe_cfg.get("session_cache_size", 16)))
         self._live_sem = asyncio.Semaphore(self.concurrency)
@@ -351,6 +353,10 @@ class ProbeService:
                 )
                 candidates = list(step.varbinds)
             if step.error_indication or step.error_status not in ("noError", "0"):
+                # v1 signals "no more variables" as noSuchName; after at least
+                # one row that is a normal end-of-subtree, not a failure.
+                if version == "v1" and step.error_status == "noSuchName" and varbinds:
+                    break
                 error = str(step.error_indication or step.error_status)
                 break
             progressed = False

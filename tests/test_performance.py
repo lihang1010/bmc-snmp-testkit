@@ -19,8 +19,9 @@ ROWS = [f"{ROOT_OID}.{i}" for i in range(1, 41)]
 
 
 class _FakeSession:
-    def __init__(self, rows: list[str]) -> None:
+    def __init__(self, rows: list[str], *, v1_nosuch_end: bool = False) -> None:
         self.rows = rows
+        self.v1_nosuch_end = v1_nosuch_end
         self.bulk_calls = 0
         self.next_calls = 0
 
@@ -32,6 +33,9 @@ class _FakeSession:
         self.next_calls += 1
         remaining = self._next(oids[0])
         if not remaining:
+            if self.v1_nosuch_end:
+                return SnmpResponse(error_indication=None, error_status="noSuchName", error_index=0,
+                                    varbinds=[], version="v1", operation="GETNEXT", target="fake")
             return SnmpResponse(error_indication=None, error_status="noError", error_index=0,
                                 varbinds=[Varbind(oid=oids[0], type="EndOfMibView",
                                                   value="EndOfMibView", exception="EndOfMibView")],
@@ -90,6 +94,14 @@ def test_walk_uses_getbulk_for_v2c_and_getnext_for_v1(tmp_path: Path):
         end_session = _FakeSession(ROWS[:3])
         varbinds, error, truncated = await service._walk(
             end_session, "v2c", ROOT_OID, "", 30,
+        )
+        assert len(varbinds) == 3 and truncated is False and error == ""
+
+        # v1 reports end-of-MIB as noSuchName; after rows were collected that is
+        # a normal stop, not a walk failure.
+        v1_end = _FakeSession(ROWS[:3], v1_nosuch_end=True)
+        varbinds, error, truncated = await service._walk(
+            v1_end, "v1", ROOT_OID, "", 30,
         )
         assert len(varbinds) == 3 and truncated is False and error == ""
 

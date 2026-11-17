@@ -36,7 +36,7 @@
 # 会话按「目标 + SNMP 版本 + 凭据」缓存复用，WALK 在 v2c/v3 下用 GETBULK 批量拉取。
 # probe:
 #   timeout_s: 5                # 单次请求超时（秒）
-#   retries: 0                  # 页面操作不自动重试，避免交互等待过久
+#   retries: 1                  # 偶发丢包时重发一次；0 = 不重试
 #   concurrency: 4              # live 探测最大并发请求数
 #   rate_limit_ms: 0            # 同一目标两次请求的最小间隔（毫秒）；0 = 不限速
 #   session_ttl_s: 300          # 空闲会话保留时间，超时后关闭
