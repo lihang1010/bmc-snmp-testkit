@@ -28,13 +28,17 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from email.message import EmailMessage
 from pathlib import Path
+from typing import Any
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 
 CODE_TTL_SECONDS = 600
 CODE_COOLDOWN_SECONDS = 60
 CODE_MAX_ATTEMPTS = 5
+CODE_PURPOSES = ("login", "register", "reset")
 PASSWORD_MIN_LENGTH = 8
+PASSWORD_MAX_FAILURES = 5
+PASSWORD_LOCK_SECONDS = 300
 SESSION_TTL_SECONDS = 7 * 24 * 3600
 PBKDF2_ROUNDS = 240_000
 
@@ -45,6 +49,12 @@ class AuthError(ValueError):
 
 def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if value is None or str(value).strip() == "":
+        return default
+    return str(value).strip().lower() not in ("0", "false", "no", "off")
 
 
 @dataclass(frozen=True)
@@ -70,33 +80,42 @@ def _hash_password(password: str, salt: bytes) -> str:
 
 
 class Mailer:
-    """SMTP sender configured entirely from environment variables."""
+    """SMTP sender configured from ``config/web.yaml`` ``mail`` or env vars.
 
-    def __init__(self) -> None:
-        self.host = os.environ.get("SNMP_TEST_SMTP_HOST", "").strip()
-        self.port = int(os.environ.get("SNMP_TEST_SMTP_PORT", "587") or 587)
-        self.username = os.environ.get("SNMP_TEST_SMTP_USER", "").strip()
-        self.password = os.environ.get("SNMP_TEST_SMTP_PASSWORD", "")
-        self.sender = os.environ.get("SNMP_TEST_SMTP_FROM", "").strip() or self.username or "no-reply@localhost"
-        self.starttls = os.environ.get("SNMP_TEST_SMTP_TLS", "1").strip().lower() not in ("0", "false", "no")
-        self.use_ssl = os.environ.get("SNMP_TEST_SMTP_SSL", "").strip().lower() in ("1", "true", "yes", "on")
+    Environment variables win, so deployments can inject secrets without
+    writing them into the yaml file.
+    """
+
+    def __init__(self, settings: dict[str, Any] | None = None) -> None:
+        settings = dict(settings or {})
+
+        def pick(env_key: str, setting_key: str, default: Any = "") -> Any:
+            value = os.environ.get(env_key)
+            return settings.get(setting_key, default) if value in (None, "") else value
+
+        self.host = str(pick("SNMP_TEST_SMTP_HOST", "host", "")).strip()
+        self.port = int(pick("SNMP_TEST_SMTP_PORT", "port", 587) or 587)
+        self.username = str(pick("SNMP_TEST_SMTP_USER", "user", "")).strip()
+        self.password = str(pick("SNMP_TEST_SMTP_PASSWORD", "password", ""))
+        self.sender = (
+            str(pick("SNMP_TEST_SMTP_FROM", "sender", "")).strip()
+            or self.username or "no-reply@localhost"
+        )
+        self.starttls = _as_bool(pick("SNMP_TEST_SMTP_TLS", "tls", "1"), True)
+        self.use_ssl = _as_bool(pick("SNMP_TEST_SMTP_SSL", "ssl", ""), False)
 
     @property
     def configured(self) -> bool:
         return bool(self.host)
 
-    def send_code(self, email: str, code: str, purpose: str) -> bool:
+    def _send(self, to_address: str, subject: str, body: str) -> bool:
         if not self.configured:
             return False
-        subject = "bmc-snmp-testkit 注册验证码" if purpose == "register" else "bmc-snmp-testkit 登录验证码"
         message = EmailMessage()
         message["Subject"] = subject
         message["From"] = self.sender
-        message["To"] = email
-        message.set_content(
-            f"你的验证码是 {code}，{CODE_TTL_SECONDS // 60} 分钟内有效。\n"
-            "如果这不是你本人的操作，请忽略本邮件。\n"
-        )
+        message["To"] = to_address
+        message.set_content(body)
         try:
             if self.use_ssl:
                 server = smtplib.SMTP_SSL(self.host, self.port, timeout=10)
@@ -112,13 +131,36 @@ class Mailer:
         except Exception:
             return False
 
+    def send_code(self, email: str, code: str, purpose: str) -> bool:
+        subject = "bmc-snmp-testkit 注册验证码" if purpose == "register" else "bmc-snmp-testkit 登录验证码"
+        if purpose == "reset":
+            subject = "bmc-snmp-testkit 重置密码验证码"
+        return self._send(
+            email,
+            subject,
+            f"你的验证码是 {code}，{CODE_TTL_SECONDS // 60} 分钟内有效。\n"
+            "如果这不是你本人的操作，请忽略本邮件。\n",
+        )
+
+    def send_test(self, email: str) -> None:
+        if not self.configured:
+            raise AuthError("未配置 SMTP：请在 config/web.yaml 填写 mail 段或设置 SNMP_TEST_SMTP_* 环境变量")
+        if not self._send(email, "bmc-snmp-testkit SMTP 测试", "这是一封 SMTP 配置测试邮件。\n"):
+            raise AuthError("测试邮件发送失败，请检查 SMTP 地址、端口与凭据")
+
 
 class AuthService:
-    def __init__(self, db_path: str | Path, *, dev_bypass: bool | None = None) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        dev_bypass: bool | None = None,
+        mail_settings: dict[str, Any] | None = None,
+    ) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self.mailer = Mailer()
+        self.mailer = Mailer(mail_settings)
         self.dev_bypass = _env_flag("SNMP_TEST_DEV_BYPASS") if dev_bypass is None else dev_bypass
         self.dev_mail_log = self.db_path.parent / "mail-dev.log"
         self._init_db()
@@ -158,6 +200,12 @@ class AuthService:
                   email TEXT NOT NULL,
                   created_at REAL NOT NULL,
                   expires_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS login_failures(
+                  email TEXT PRIMARY KEY,
+                  failures INTEGER NOT NULL DEFAULT 0,
+                  locked_until REAL NOT NULL DEFAULT 0,
+                  updated_at REAL NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_codes_email ON codes(email, purpose);
                 CREATE INDEX IF NOT EXISTS idx_sessions_email ON sessions(email);
@@ -208,14 +256,14 @@ class AuthService:
 
     # ---------------------------------------------------------------- public
     def send_code(self, email: str, purpose: str = "login") -> dict:
-        purpose = purpose if purpose in ("login", "register") else "login"
+        purpose = purpose if purpose in CODE_PURPOSES else "login"
         email = self._norm_email(email)
         now = time.time()
         with self._lock, self._connect() as conn:
             exists = conn.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone() is not None
             if purpose == "register" and exists:
                 raise AuthError("该邮箱已注册，请直接登录")
-            if purpose == "login" and not exists:
+            if purpose in ("login", "reset") and not exists:
                 raise AuthError("该邮箱尚未注册，请先注册")
             last = conn.execute(
                 "SELECT created_at FROM codes WHERE email=? AND purpose=? ORDER BY id DESC LIMIT 1",
@@ -257,17 +305,60 @@ class AuthService:
             token = self._new_session(conn, email)
         return token, User(email, now)
 
+    def reset_password(self, email: str, code: str, password: str) -> tuple[str, User]:
+        email = self._norm_email(email)
+        self._check_password(password)
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT created_at FROM users WHERE email=?", (email,)).fetchone()
+            if row is None:
+                raise AuthError("该邮箱尚未注册，请先注册")
+            self._verify_code(conn, email, code, "reset")
+            salt = secrets.token_bytes(16)
+            conn.execute(
+                "UPDATE users SET password_hash=?, salt=? WHERE email=?",
+                (_hash_password(password, salt), salt.hex(), email),
+            )
+            # A reset must invalidate every existing session and clear any lockout.
+            conn.execute("DELETE FROM sessions WHERE email=?", (email,))
+            conn.execute("DELETE FROM login_failures WHERE email=?", (email,))
+            conn.commit()
+            token = self._new_session(conn, email)
+        return token, User(email, float(row["created_at"]))
+
     def login_password(self, email: str, password: str) -> tuple[str, User]:
         email = self._norm_email(email)
+        now = time.time()
         with self._lock, self._connect() as conn:
             row = conn.execute(
                 "SELECT password_hash, salt, created_at FROM users WHERE email=?", (email,)
             ).fetchone()
             if row is None:
                 raise AuthError("邮箱或密码错误")
+            failure = conn.execute(
+                "SELECT failures, locked_until FROM login_failures WHERE email=?", (email,)
+            ).fetchone()
+            if failure is not None and float(failure["locked_until"]) > now:
+                wait = int(float(failure["locked_until"]) - now) + 1
+                raise AuthError(f"密码错误次数过多，请 {wait} 秒后再试")
             digest = _hash_password(password or "", bytes.fromhex(row["salt"]))
             if not secrets.compare_digest(digest, row["password_hash"]):
-                raise AuthError("邮箱或密码错误")
+                count = (int(failure["failures"]) if failure else 0) + 1
+                locked_until = now + PASSWORD_LOCK_SECONDS if count >= PASSWORD_MAX_FAILURES else 0.0
+                conn.execute(
+                    "INSERT INTO login_failures(email, failures, locked_until, updated_at) "
+                    "VALUES(?,?,?,?) ON CONFLICT(email) DO UPDATE SET "
+                    "failures=excluded.failures, locked_until=excluded.locked_until, "
+                    "updated_at=excluded.updated_at",
+                    (email, count, locked_until, now),
+                )
+                conn.commit()
+                if count >= PASSWORD_MAX_FAILURES:
+                    raise AuthError(
+                        f"密码错误次数过多，请 {PASSWORD_LOCK_SECONDS // 60} 分钟后再试"
+                    )
+                raise AuthError(f"邮箱或密码错误，还可尝试 {PASSWORD_MAX_FAILURES - count} 次")
+            conn.execute("DELETE FROM login_failures WHERE email=?", (email,))
+            conn.commit()
             token = self._new_session(conn, email)
             return token, User(email, float(row["created_at"]))
 
@@ -327,4 +418,5 @@ class AuthService:
         with self._lock, self._connect() as conn:
             conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
             conn.execute("DELETE FROM codes WHERE expires_at < ?", (now - 3600,))
+            conn.execute("DELETE FROM login_failures WHERE updated_at < ?", (now - 86400,))
             conn.commit()

@@ -5,11 +5,11 @@
 #   登录：密码登录，或邮箱验证码登录
 #   权限：所有注册账号完全一致（无角色区分）
 #   数据：work/auth.db（SQLite：用户、验证码、会话）
-#   邮件：SMTP 通过环境变量配置，未配置时验证码写入 work/mail-dev.log
-#         并直接显示在登录页（开发模式）
+#   邮件：SMTP 可在下方 mail 段配置，也可用 SNMP_TEST_SMTP_* 环境变量（优先）；
+#         未配置时验证码写入 work/mail-dev.log 并直接显示在登录页（开发模式）
 #
 #   SNMP_TEST_SMTP_HOST / SNMP_TEST_SMTP_PORT / SNMP_TEST_SMTP_USER
-#   SNMP_TEST_SMTP_PASSWORD / SNMP_TEST_SMTP_FROM / SNMP_TEST_SMTP_TLS
+#   SNMP_TEST_SMTP_PASSWORD / SNMP_TEST_SMTP_FROM / SNMP_TEST_SMTP_TLS / SNMP_TEST_SMTP_SSL
 
 # 内网部署：live 目标默认可达，不设 allow_live / 白名单等前置门槛。
 # 所有交互式 SNMP 操作（含 SET 值）写入 work/probe-audit.jsonl，按账号溯源；
@@ -25,6 +25,17 @@
 #     hard_block_enabled: true    # live SET 应用 safety-policy.yaml 的硬阻断
 # 旧的顶层 security.allow_live / allowed_targets 与 auth.users 属于历史模板，不再读取。
 # 被策略拒绝的操作也写入审计（policy_denied）。
+
+# 邮件（可选；环境变量 SNMP_TEST_SMTP_* 优先于这里的值）。
+# 含明文密码的 config/web.yaml 不要提交到仓库。
+# mail:
+#   host: smtp.example.com
+#   port: 587
+#   user: no-reply@example.com
+#   password: "change-me"
+#   sender: no-reply@example.com
+#   tls: true                   # 非 SSL 端口默认 STARTTLS
+#   ssl: false                  # true 时直接 SMTPS
 
 # SNMP 超时：timeout_s 是每次尝试的超时，最坏耗时约为 timeout_s × (retries + 1)。
 # 批量任务：

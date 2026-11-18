@@ -178,12 +178,13 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 浏览器打开 `http://<服务地址>:8080`，未登录会跳转到 `/login`：
 
 - **注册**：邮箱 + 邮箱验证码 + 密码（至少 8 位），注册成功自动登录；
-- **登录**：密码登录，或邮箱验证码登录；
+- **登录**：密码登录，或邮箱验证码登录；密码连续错误 5 次锁定 5 分钟；
+- **忘记密码**：邮箱验证码重置新密码，重置后旧会话全部失效并自动登录；
 - **权限**：所有注册账号完全一致，没有角色区分；
 - **MIB 库共享**：所有账号看到同一份 MIB 列表，都能上传，按内容哈希去重；
 - **任务队列隔离**：每个账号只能看到自己的任务、报告和通过率。
 
-**邮件配置**：设置 `SNMP_TEST_SMTP_HOST`、`SNMP_TEST_SMTP_PORT`、`SNMP_TEST_SMTP_USER`、`SNMP_TEST_SMTP_PASSWORD`、`SNMP_TEST_SMTP_FROM`（可选 `SNMP_TEST_SMTP_TLS` / `SNMP_TEST_SMTP_SSL`）后真发邮件。未配置时进入开发模式：验证码写入 `work/mail-dev.log` 并直接显示在登录页。账号、验证码与会话保存在 `work/auth.db`（SQLite），密码用 PBKDF2-HMAC-SHA256 加盐存储，会话为服务端随机 token + HttpOnly Cookie（默认 7 天）。
+**邮件配置**：在 `config/web.yaml` 的 `mail` 段填写 `host` / `port` / `user` / `password` / `sender` / `tls` / `ssl`，或用 `SNMP_TEST_SMTP_*` 环境变量（环境变量优先）。配置后真发邮件，登录后可在账号菜单点「发送测试邮件」验证。未配置时进入开发模式：验证码写入 `work/mail-dev.log` 并直接显示在登录页。账号、验证码与会话保存在 `work/auth.db`（SQLite），密码用 PBKDF2-HMAC-SHA256 加盐存储，会话为服务端随机 token + HttpOnly Cookie（默认 7 天）。
 
 **MIB 浏览器**（`/mib-browser`）：导入 MIB 后左侧是可展开的 OID 树（组 / 表 / 表项 / 列；WALK 之后还会挂出动态发现的实例行），右侧是结果区。填目标 IP 后**单击节点选中、双击执行探测**（标量 `GET .0`，表 / 表项 / 列 / 组 `WALK`），执行期间顶栏显示进度与转圈动画；结果默认按 MIB 表结构聚合成二维表格（行 = 实例、列 = 表列），可切换「Table View / 仅表格 / Raw（原始 OID）」。支持枚举值→文本、OID→节点名、点击行查看完整实例详情、CSV 导出、自动刷新、右键菜单与 `SET`（先校验目标 IP；仅 `read-write` / `write-only` 的标量或列会弹窗；只读与结构节点、无行索引的列会提示不可写，弹窗内填写值与类型并二次确认）。WALK 按 `cursor` 自动续页取全整表，不受单页 200 条限制（v2c / v3 用 GETBULK 批量拉取，v1 退回 GETNEXT）；同一目标的 SNMP 会话按「目标 + 版本 + 凭据」缓存复用，空闲超过 TTL 或缓存满时才关闭重建。所有操作写入 `work/probe-audit.jsonl`。探测请求携带当前选中的 `mib_id`，切换 MIB 后探测与模拟 Agent 都会使用新模型，不再默认取最近上传的 MIB。
 
@@ -209,7 +210,9 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 | GET | `/login` | 登录 / 注册页面（已登录时跳转 `/`） |
 | POST | `/api/auth/code` | 发送邮箱验证码（`purpose`: `register` / `login`） |
 | POST | `/api/auth/register` | 邮箱 + 验证码 + 密码注册，成功即建会话 |
+| POST | `/api/auth/reset` | 邮箱验证码重置密码，旧会话失效并建立新会话 |
 | POST | `/api/auth/login` | 登录（`method`: `password` / `code`） |
+| POST | `/api/mail/test` | 给当前登录账号发送 SMTP 测试邮件 |
 | POST | `/api/auth/logout` | 退出并清除会话 |
 | GET | `/api/auth/me` | 当前账号 |
 | GET | `/api/config` | 服务能力、白名单、队列状态 |

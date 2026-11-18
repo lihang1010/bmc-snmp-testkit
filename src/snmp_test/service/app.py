@@ -66,6 +66,12 @@ class RegisterRequest(BaseModel):
     password: str
 
 
+class ResetRequest(BaseModel):
+    email: str
+    code: str
+    password: str
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str | None = None
@@ -95,6 +101,13 @@ def _web_security(config_path: Path) -> dict[str, Any]:
     return dict(raw.get("security") or {})
 
 
+def _mail_settings(config_path: Path) -> dict[str, Any]:
+    if not config_path.is_file():
+        return {}
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    return dict(raw.get("mail") or {})
+
+
 def _token(request: Request) -> str | None:
     header = request.headers.get("authorization", "")
     if header.lower().startswith("bearer "):
@@ -110,7 +123,10 @@ def create_app(
     workspace = Path(root) if root else ROOT
     cfg_path = Path(config_path) if config_path else workspace / "config" / "web.yaml"
     security_cfg = _web_security(cfg_path)
-    auth = AuthService(workspace / "work" / "auth.db")
+    auth = AuthService(
+        workspace / "work" / "auth.db",
+        mail_settings=_mail_settings(cfg_path),
+    )
     library = MibLibrary(workspace, workspace / "config" / "safety-policy.yaml")
     store = JobStore(workspace)
     workers = int(os.environ.get("SNMP_TEST_WEB_WORKERS", "2") or 2)
@@ -190,6 +206,16 @@ def create_app(
         set_session(response, token)
         return response
 
+    @app.post("/api/auth/reset")
+    async def auth_reset(payload: ResetRequest):
+        try:
+            token, user = auth.reset_password(payload.email, payload.code, payload.password)
+        except AuthError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        response = JSONResponse({"user": user.email})
+        set_session(response, token)
+        return response
+
     @app.post("/api/auth/login")
     async def auth_login(payload: LoginRequest):
         try:
@@ -214,6 +240,15 @@ def create_app(
     async def auth_me(request: Request):
         user = require(request)
         return {"user": user.email, "email": user.email, "role": user.role}
+
+    @app.post("/api/mail/test")
+    async def mail_test(request: Request):
+        user = require(request)
+        try:
+            auth.mailer.send_test(user.email)
+        except AuthError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"sent": True, "to": user.email}
 
     # Kept for the console page's polling code.
     @app.get("/api/session")

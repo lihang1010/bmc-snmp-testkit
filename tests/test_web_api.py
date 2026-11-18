@@ -145,9 +145,69 @@ def test_login_page_and_redirect(web):
     with _no_cookie(client):
         page = client.get("/login")
         assert page.status_code == 200 and "密码登录" in page.text
+        assert 'data-tab="reset"' in page.text and 'id="panel-reset"' in page.text
+        assert 'id="x-submit"' in page.text
         r = client.get("/", follow_redirects=False)
         assert r.status_code == 302 and r.headers["location"] == "/login"
     assert client.get("/", headers=_headers(alice)).status_code == 200
+    assert 'id="mailTestBtn"' in client.get("/", headers=_headers(alice)).text
+
+
+def test_password_reset_flow(web):
+    client, _, _, _, _ = web
+    email = "reset-flow@example.com"
+    old_token = _register(client, email)
+    assert client.get("/api/mibs", headers=_headers(old_token)).status_code == 200
+
+    code = _send_code(client, email, "reset")
+    reset = client.post(
+        "/api/auth/reset",
+        json={"email": email, "code": code, "password": "new-password-123"},
+    )
+    assert reset.status_code == 200, reset.text
+
+    assert client.get("/api/mibs", headers=_headers(old_token)).status_code == 401
+    old_login = client.post(
+        "/api/auth/login",
+        json={"email": email, "password": PASSWORD, "method": "password"},
+    )
+    assert old_login.status_code == 401
+    new_login = client.post(
+        "/api/auth/login",
+        json={"email": email, "password": "new-password-123", "method": "password"},
+    )
+    assert new_login.status_code == 200 and new_login.json()["user"] == email
+
+
+def test_password_login_lockout(web):
+    client, _, _, _, _ = web
+    email = "lockout-flow@example.com"
+    _register(client, email)
+    for _ in range(4):
+        assert client.post(
+            "/api/auth/login",
+            json={"email": email, "password": "wrong-password", "method": "password"},
+        ).status_code == 401
+    last = client.post(
+        "/api/auth/login",
+        json={"email": email, "password": "wrong-password", "method": "password"},
+    )
+    assert last.status_code == 401 and "次数过多" in last.json()["detail"]
+    correct = client.post(
+        "/api/auth/login",
+        json={"email": email, "password": PASSWORD, "method": "password"},
+    )
+    assert correct.status_code == 401 and "次数过多" in correct.json()["detail"]
+
+
+def test_mail_test_endpoint(web, monkeypatch):
+    client, _, app, alice, _ = web
+    sent = []
+    monkeypatch.setattr(app.state.auth.mailer, "send_test", lambda email: sent.append(email))
+    response = client.post("/api/mail/test", headers=_headers(alice))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"sent": True, "to": ALICE}
+    assert sent == [ALICE]
 
 
 def test_auth_validation(web):

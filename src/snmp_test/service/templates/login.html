@@ -35,7 +35,7 @@
   h1{font-size:17px;margin:0;font-weight:700}
   .sub{color:var(--muted);font-size:11.5px;margin-top:2px}
   .tabs{
-    display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px;
+    display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:4px;
     background:var(--surface-2);border:1px solid var(--line);border-radius:10px;margin-bottom:20px;
   }
   .tabs button{
@@ -83,6 +83,7 @@
   #toast.bad{border-left-color:var(--fail)}
   @keyframes toast-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   .foot{margin-top:18px;text-align:center;color:var(--faint);font-size:11px}
+  @media(max-width:380px){ .tabs button{font-size:11px} }
 </style>
 </head>
 <body>
@@ -99,6 +100,7 @@
       <button type="button" data-tab="password" class="active">密码登录</button>
       <button type="button" data-tab="code">验证码登录</button>
       <button type="button" data-tab="register">注册</button>
+      <button type="button" data-tab="reset">忘记密码</button>
     </div>
 
     <section id="panel-password" class="panel">
@@ -135,6 +137,21 @@
       <button id="r-submit" class="btn btn--primary">注册并登录</button>
     </section>
 
+    <section id="panel-reset" class="panel hidden">
+      <label for="x-email">邮箱</label>
+      <input id="x-email" type="email" autocomplete="username" placeholder="name@example.com">
+      <label for="x-code">邮箱验证码</label>
+      <div class="row">
+        <input id="x-code" inputmode="numeric" maxlength="6" placeholder="6 位数字">
+        <button id="x-send" class="btn btn--ghost">发送验证码</button>
+      </div>
+      <label for="x-password">新密码（至少 8 位）</label>
+      <input id="x-password" type="password" autocomplete="new-password" placeholder="不少于 8 位">
+      <label for="x-password2">确认新密码</label>
+      <input id="x-password2" type="password" autocomplete="new-password" placeholder="再次输入新密码">
+      <button id="x-submit" class="btn btn--primary">重置密码并登录</button>
+    </section>
+
     <div id="devHint" class="hint dev hidden"></div>
     <div class="foot">注册即表示同意本服务仅用于只读 SNMP 测试</div>
   </main>
@@ -165,16 +182,17 @@
   var currentTab = 'password';
   function showTab(name){
     currentTab = name;
-    ['password','code','register'].forEach(function(t){
+    ['password','code','register','reset'].forEach(function(t){
       var btn = document.querySelector('.tabs button[data-tab="'+t+'"]');
       btn.classList.toggle('active', t===name);
       $('panel-'+t).classList.toggle('hidden', t!==name);
     });
     // carry the email across panels so users don't retype it
     var src = currentTab==='password' ? $('p-email').value
-            : currentTab==='code' ? $('c-email').value : $('r-email').value;
+            : currentTab==='code' ? $('c-email').value
+            : currentTab==='register' ? $('r-email').value : $('x-email').value;
     if(!src) return;
-    ['p-email','c-email','r-email'].forEach(function(id){
+    ['p-email','c-email','r-email','x-email'].forEach(function(id){
       if(!$(id).value) $(id).value = src;
     });
   }
@@ -187,6 +205,7 @@
       $('devHint').classList.remove('hidden');
       $('devHint').innerHTML = '开发模式（未配置 SMTP）：本次验证码为 <b>'+esc(d.dev_code)+'</b>，已自动填入。';
       if(currentTab==='register'){ $('r-code').value = d.dev_code; }
+      else if(currentTab==='reset'){ $('x-code').value = d.dev_code; }
       else { $('c-code').value = d.dev_code; }
     } else {
       $('devHint').classList.add('hidden');
@@ -221,6 +240,7 @@
   }
   $('c-send').addEventListener('click', function(){ sendCode('c-email','c-send','login'); });
   $('r-send').addEventListener('click', function(){ sendCode('r-email','r-send','register'); });
+  $('x-send').addEventListener('click', function(){ sendCode('x-email','x-send','reset'); });
 
   function afterLogin(d){
     toast('登录成功，正在进入控制台…');
@@ -261,12 +281,26 @@
       .finally(function(){ btn.disabled=false; });
   });
 
+  $('x-submit').addEventListener('click', function(){
+    var email=$('x-email').value.trim(), code=$('x-code').value.trim();
+    var pwd=$('x-password').value, pwd2=$('x-password2').value;
+    if(!email || !code || !pwd){ toast('请填写邮箱、验证码和新密码', true); return; }
+    if(pwd.length < 8){ toast('密码至少需要 8 位', true); return; }
+    if(pwd !== pwd2){ toast('两次输入的密码不一致', true); return; }
+    var btn=this; btn.disabled = true;
+    api('/api/auth/reset',{method:'POST',body:JSON.stringify({email:email,code:code,password:pwd})})
+      .then(afterLogin)
+      .catch(function(e){ toast(e.message, true); })
+      .finally(function(){ btn.disabled=false; });
+  });
+
   // Enter submits the visible panel
   document.addEventListener('keydown', function(e){
     if(e.key !== 'Enter') return;
     if(currentTab==='password') $('p-submit').click();
     else if(currentTab==='code') $('c-submit').click();
-    else $('r-submit').click();
+    else if(currentTab==='register') $('r-submit').click();
+    else $('x-submit').click();
   });
 
 })();

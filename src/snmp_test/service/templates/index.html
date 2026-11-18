@@ -61,6 +61,7 @@
   .user-panel-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
   .user-panel-email{margin-top:4px;font-size:12.5px;font-weight:600;word-break:break-all}
   .user-panel-logout{width:100%}
+  .user-panel-test{width:100%;margin-bottom:8px}
 
   .wrap{max-width:1760px;margin:0 auto;padding:20px clamp(14px,2.2vw,28px) 56px}
   .status-bar{
@@ -325,6 +326,7 @@
           <div class="user-panel-label">当前账号</div>
           <div id="userEmail" class="user-panel-email">—</div>
         </div>
+        <button id="mailTestBtn" class="btn btn--ghost btn--sm user-panel-test">发送测试邮件</button>
         <button id="logoutBtn" class="btn btn--ghost btn--sm user-panel-logout">退出登录</button>
       </div>
     </div>
@@ -514,6 +516,13 @@
     api('/api/auth/logout',{method:'POST'})
       .catch(function(){})
       .then(function(){ location.href='/login'; });
+  });
+  $('mailTestBtn').addEventListener('click', function(){
+    var btn=this; btn.disabled=true;
+    api('/api/mail/test',{method:'POST'})
+      .then(function(d){ toast('测试邮件已发送到 '+d.to); })
+      .catch(function(e){ toast(e.message, true); })
+      .finally(function(){ btn.disabled=false; });
   });
 
   $('uploadBtn').addEventListener('click', function(){
