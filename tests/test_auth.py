@@ -192,6 +192,36 @@ def test_mailer_test_message_requires_configuration(tmp_path, monkeypatch):
         auth.mailer.send_test("user@example.com")
 
 
+def test_mailer_quit_failure_after_delivery_is_not_an_error(monkeypatch):
+    for name in ("SNMP_TEST_SMTP_HOST", "SNMP_TEST_SMTP_SSL", "SNMP_TEST_SMTP_TLS"):
+        monkeypatch.delenv(name, raising=False)
+    delivered = []
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=10):
+            pass
+
+        def starttls(self):
+            pass
+
+        def login(self, user, password):
+            pass
+
+        def send_message(self, message):
+            delivered.append(message["To"])
+
+        def quit(self):
+            raise auth_module.smtplib.SMTPServerDisconnected("connection reset")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(auth_module.smtplib, "SMTP", FakeSMTP)
+    mailer = Mailer({"host": "smtp.test", "port": 587, "tls": True})
+    mailer.send_test("to@test")
+    assert delivered == ["to@test"]
+
+
 def test_mailer_sends_through_smtp_ssl(monkeypatch):
     for name in ("SNMP_TEST_SMTP_HOST", "SNMP_TEST_SMTP_SSL", "SNMP_TEST_SMTP_TLS"):
         monkeypatch.delenv(name, raising=False)
@@ -201,12 +231,6 @@ def test_mailer_sends_through_smtp_ssl(monkeypatch):
         def __init__(self, host, port, timeout=10):
             calls["connect"] = (host, port)
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
         def starttls(self):
             calls["starttls"] = True
 
@@ -215,6 +239,12 @@ def test_mailer_sends_through_smtp_ssl(monkeypatch):
 
         def send_message(self, message):
             calls["message"] = message
+
+        def quit(self):
+            calls["quit"] = True
+
+        def close(self):
+            pass
 
     monkeypatch.setattr(auth_module.smtplib, "SMTP_SSL", FakeSMTP)
     mailer = Mailer({

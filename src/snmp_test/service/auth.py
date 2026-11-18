@@ -16,6 +16,7 @@ Design notes:
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import secrets
@@ -41,6 +42,8 @@ PASSWORD_MAX_FAILURES = 5
 PASSWORD_LOCK_SECONDS = 300
 SESSION_TTL_SECONDS = 7 * 24 * 3600
 PBKDF2_ROUNDS = 240_000
+
+logger = logging.getLogger(__name__)
 
 
 class AuthError(ValueError):
@@ -103,6 +106,7 @@ class Mailer:
         )
         self.starttls = _as_bool(pick("SNMP_TEST_SMTP_TLS", "tls", "1"), True)
         self.use_ssl = _as_bool(pick("SNMP_TEST_SMTP_SSL", "ssl", ""), False)
+        self.last_error = ""
 
     @property
     def configured(self) -> bool:
@@ -116,20 +120,34 @@ class Mailer:
         message["From"] = self.sender
         message["To"] = to_address
         message.set_content(body)
+        self.last_error = ""
+        server = None
         try:
             if self.use_ssl:
                 server = smtplib.SMTP_SSL(self.host, self.port, timeout=10)
             else:
                 server = smtplib.SMTP(self.host, self.port, timeout=10)
-            with server:
-                if self.starttls and not self.use_ssl:
-                    server.starttls()
-                if self.username:
-                    server.login(self.username, self.password)
-                server.send_message(message)
-            return True
-        except Exception:
+            if self.starttls and not self.use_ssl:
+                server.starttls()
+            if self.username:
+                server.login(self.username, self.password)
+            server.send_message(message)
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("SMTP send to %s failed: %s", to_address, self.last_error)
             return False
+        finally:
+            if server is not None:
+                # A reset while saying QUIT must not turn a delivered message
+                # into a reported failure.
+                try:
+                    server.quit()
+                except Exception:
+                    try:
+                        server.close()
+                    except Exception:
+                        pass
+        return True
 
     def send_code(self, email: str, code: str, purpose: str) -> bool:
         subject = "bmc-snmp-testkit 注册验证码" if purpose == "register" else "bmc-snmp-testkit 登录验证码"
@@ -146,7 +164,8 @@ class Mailer:
         if not self.configured:
             raise AuthError("未配置 SMTP：请在 config/web.yaml 填写 mail 段或设置 SNMP_TEST_SMTP_* 环境变量")
         if not self._send(email, "bmc-snmp-testkit SMTP 测试", "这是一封 SMTP 配置测试邮件。\n"):
-            raise AuthError("测试邮件发送失败，请检查 SMTP 地址、端口与凭据")
+            detail = f"（{self.last_error}）" if self.last_error else ""
+            raise AuthError(f"测试邮件发送失败，请检查 SMTP 地址、端口与凭据{detail}")
 
 
 class AuthService:
@@ -285,7 +304,8 @@ class AuthService:
                 fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {purpose} {email} code={code}\n")
             return {"sent": False, "dev_code": code, "cooldown": CODE_COOLDOWN_SECONDS}
         if not self.mailer.send_code(email, code, purpose):
-            raise AuthError("邮件发送失败，请稍后重试或联系管理员")
+            detail = f"（{self.mailer.last_error}）" if self.mailer.last_error else ""
+            raise AuthError(f"邮件发送失败，请稍后重试或联系管理员{detail}")
         return {"sent": True, "dev_code": None, "cooldown": CODE_COOLDOWN_SECONDS}
 
     def register(self, email: str, code: str, password: str) -> tuple[str, User]:
