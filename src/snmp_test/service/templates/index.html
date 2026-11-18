@@ -951,7 +951,10 @@
 
   function fmtClock(ts){
     if(!ts) return '—';
-    return new Date(ts * 1000).toLocaleTimeString('zh-CN', {hour12:false});
+    var d = new Date(ts * 1000);
+    function pad(n){ return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
   }
   function fmtElapsed(seconds){
     seconds = Math.max(0, Math.round(seconds));
@@ -967,7 +970,7 @@
     var start = j.started_at || j.created_at;
     if(!start) return '—';
     var end = j.finished_at || (j.status === 'running' ? Date.now() / 1000 : null);
-    var text = fmtClock(start);
+    var text = '<span style="white-space:nowrap">' + fmtClock(start) + '</span>';
     if(end) text += '<br><span class="muted">' + (j.status === 'running' ? '已运行 ' : '用时 ') + fmtElapsed(end - start) + '</span>';
     return text;
   }
