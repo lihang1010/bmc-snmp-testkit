@@ -97,6 +97,7 @@
         <label><input id="mailTls" type="checkbox" checked> STARTTLS（587 端口）</label>
         <label><input id="mailSsl" type="checkbox"> SSL / SMTPS（465 端口）</label>
       </div>
+      <div class="field span2 hidden" id="tlsHint" style="color:#b45309;font-size:11.5px"></div>
     </div>
     <div class="actions">
       <button class="btn" id="mailTestBtn" type="button">保存并发送测试邮件</button>
@@ -140,10 +141,29 @@
     $('mailTls').checked = !!d.tls;
     $('mailSsl').checked = !!d.ssl;
     $('envNote').classList.toggle('hidden', !d.env_override);
+    syncTlsHint();
     var state = $('mailState');
     state.textContent = d.configured ? '已配置' : '未配置（开发模式）';
     state.className = 'state ' + (d.configured ? 'ok' : 'warn');
   }
+  function syncTlsHint(){
+    var port = parseInt($('mailPort').value || '0', 10);
+    var ssl = $('mailSsl').checked, tls = $('mailTls').checked, msg = '';
+    if(port === 465 && !ssl){
+      msg = '465 端口通常需要勾选 SSL；当前未勾选 SSL，握手可能失败。';
+    } else if((port === 587 || port === 25) && ssl){
+      msg = '587/25 端口通常使用 STARTTLS：请取消 SSL、勾选 STARTTLS。SSL 用于 465。';
+    } else if(port === 465 && tls){
+      msg = '465 使用 SSL 时可取消 STARTTLS（SSL 本身已加密）。';
+    }
+    var hint = $('tlsHint');
+    hint.textContent = msg;
+    hint.classList.toggle('hidden', !msg);
+  }
+  $('mailPort').addEventListener('input', syncTlsHint);
+  $('mailSsl').addEventListener('change', syncTlsHint);
+  $('mailTls').addEventListener('change', syncTlsHint);
+
   function payload(){
     return {
       host: $('mailHost').value.trim(),

@@ -184,7 +184,7 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 - **MIB 库共享**：所有账号看到同一份 MIB 列表，都能上传，按内容哈希去重；
 - **任务队列隔离**：每个账号只能看到自己的任务、报告和通过率。
 
-**邮件配置**：登录后可从账号菜单进入「邮件设置」页填写 SMTP，保存到 `work/mail.yaml`（权限 0600，密码不回显、留空保持不变），保存后立即生效；也可在 `config/web.yaml` 的 `mail` 段或用 `SNMP_TEST_SMTP_*` 环境变量配置。优先级：**环境变量 > 页面保存 > `config/web.yaml`**。账号、验证码与会话保存在 `work/auth.db`（SQLite），密码用 PBKDF2-HMAC-SHA256 加盐存储，会话为服务端随机 token + HttpOnly Cookie（默认 7 天）。未配置时进入开发模式：验证码写入 `work/mail-dev.log` 并直接显示在登录页。
+**邮件配置**：登录后可从账号菜单进入「邮件设置」页填写 SMTP，保存到 `work/mail.yaml`（权限 0600，密码不回显、留空保持不变），保存后立即生效；也可在 `config/web.yaml` 的 `mail` 段或用 `SNMP_TEST_SMTP_*` 环境变量配置。优先级：**环境变量 > 页面保存 > `config/web.yaml`**。端口与加密方式必须匹配：465 用 SSL（`ssl: true`），587/25 用 STARTTLS（`tls: true, ssl: false`），混用会报 `WRONG_VERSION_NUMBER`。账号、验证码与会话保存在 `work/auth.db`（SQLite），密码用 PBKDF2-HMAC-SHA256 加盐存储，会话为服务端随机 token + HttpOnly Cookie（默认 7 天）。未配置时进入开发模式：验证码写入 `work/mail-dev.log` 并直接显示在登录页。
 
 **MIB 浏览器**（`/mib-browser`）：导入 MIB 后左侧是可展开的 OID 树（组 / 表 / 表项 / 列；WALK 之后还会挂出动态发现的实例行），右侧是结果区。填目标 IP 后**单击节点选中、双击执行探测**（标量 `GET .0`，表 / 表项 / 列 / 组 `WALK`），执行期间顶栏显示进度与转圈动画；结果默认按 MIB 表结构聚合成二维表格（行 = 实例、列 = 表列），可切换「Table View / 仅表格 / Raw（原始 OID）」。支持枚举值→文本、OID→节点名、点击行查看完整实例详情、CSV 导出、自动刷新、右键菜单与 `SET`（先校验目标 IP；仅 `read-write` / `write-only` 的标量或列会弹窗；只读与结构节点、无行索引的列会提示不可写，弹窗内填写值与类型并二次确认）。WALK 按 `cursor` 自动续页取全整表，不受单页 200 条限制（v2c / v3 用 GETBULK 批量拉取，v1 退回 GETNEXT）；同一目标的 SNMP 会话按「目标 + 版本 + 凭据」缓存复用，空闲超过 TTL 或缓存满时才关闭重建。所有操作写入 `work/probe-audit.jsonl`。探测请求携带当前选中的 `mib_id`，切换 MIB 后探测与模拟 Agent 都会使用新模型，不再默认取最近上传的 MIB。
 

@@ -160,12 +160,17 @@ class Mailer:
             "如果这不是你本人的操作，请忽略本邮件。\n",
         )
 
+    def _error_detail(self) -> str:
+        detail = self.last_error
+        if detail and "WRONG_VERSION_NUMBER" in detail:
+            detail += "；端口与加密方式不匹配：465 用 SSL（ssl=true），587/25 用 STARTTLS（tls=true, ssl=false）"
+        return f"（{detail}）" if detail else ""
+
     def send_test(self, email: str) -> None:
         if not self.configured:
             raise AuthError("未配置 SMTP：请在 config/web.yaml 填写 mail 段或设置 SNMP_TEST_SMTP_* 环境变量")
         if not self._send(email, "bmc-snmp-testkit SMTP 测试", "这是一封 SMTP 配置测试邮件。\n"):
-            detail = f"（{self.last_error}）" if self.last_error else ""
-            raise AuthError(f"测试邮件发送失败，请检查 SMTP 地址、端口与凭据{detail}")
+            raise AuthError(f"测试邮件发送失败，请检查 SMTP 地址、端口与凭据{self._error_detail()}")
 
 
 class AuthService:
@@ -304,8 +309,7 @@ class AuthService:
                 fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {purpose} {email} code={code}\n")
             return {"sent": False, "dev_code": code, "cooldown": CODE_COOLDOWN_SECONDS}
         if not self.mailer.send_code(email, code, purpose):
-            detail = f"（{self.mailer.last_error}）" if self.mailer.last_error else ""
-            raise AuthError(f"邮件发送失败，请稍后重试或联系管理员{detail}")
+            raise AuthError(f"邮件发送失败，请稍后重试或联系管理员{self.mailer._error_detail()}")
         return {"sent": True, "dev_code": None, "cooldown": CODE_COOLDOWN_SECONDS}
 
     def register(self, email: str, code: str, password: str) -> tuple[str, User]:

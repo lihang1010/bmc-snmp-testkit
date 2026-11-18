@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import sqlite3
+import ssl
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -190,6 +191,17 @@ def test_mailer_test_message_requires_configuration(tmp_path, monkeypatch):
     auth = AuthService(tmp_path / "auth.db", dev_bypass=False, mail_settings={})
     with pytest.raises(AuthError, match="未配置 SMTP"):
         auth.mailer.send_test("user@example.com")
+
+
+def test_smtp_wrong_version_reports_port_encryption_hint(monkeypatch):
+    class BrokenTls:
+        def __init__(self, *args, **kwargs):
+            raise ssl.SSLError("[SSL: WRONG_VERSION_NUMBER] wrong version number")
+
+    monkeypatch.setattr(auth_module.smtplib, "SMTP_SSL", BrokenTls)
+    mailer = Mailer({"host": "smtp.qq.com", "port": 587, "ssl": True, "tls": False})
+    with pytest.raises(AuthError, match="端口与加密方式不匹配"):
+        mailer.send_test("user@example.com")
 
 
 def test_mailer_quit_failure_after_delivery_is_not_an_error(monkeypatch):
