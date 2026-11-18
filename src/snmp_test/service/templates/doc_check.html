@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  :root{--bg:#f4f7fb;--surface:#fff;--surface-2:#f8fafc;--field:#fff;--line:#e2e8f0;--line-soft:#eef2f7;
+    --text:#0f172a;--muted:#64748b;--faint:#94a3b8;--accent:#0284c7;--ok:#059669;--warn:#d97706;--fail:#dc2626}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;color:var(--text);background:var(--bg);
+    font:14px/1.6 "Inter",ui-sans-serif,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
+    padding:12px clamp(16px,3vw,32px);background:rgba(255,255,255,.9);border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand-mark{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-weight:800;
+    font-size:11px;color:#fff;background:linear-gradient(135deg,#0ea5e9,#06b6d4)}
+  h1{font-size:16px;margin:0}.sub{color:var(--muted);font-size:11.5px;margin-top:2px}
+  .nav{display:flex;gap:9px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;justify-content:center;height:34px;padding:0 14px;border-radius:9px;
+    border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;font-size:12.5px;
+    font-weight:650;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s,opacity .15s}
+  .btn:hover:not(:disabled){background:var(--surface-2);border-color:#cbd5e1}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn--primary{color:#fff;border-color:transparent;background:linear-gradient(135deg,#0ea5e9,#06b6d4)}
+  .wrap{max-width:1120px;margin:26px auto 60px;padding:0 16px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 10px 30px rgba(15,23,42,.05);padding:22px}
+  .card+.card{margin-top:16px}
+  h2{font-size:15px;margin:0 0 16px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:13px 16px}
+  .field.span2{grid-column:1 / -1}
+  label{display:block;color:var(--muted);font-size:11.5px;font-weight:600;margin:0 0 6px}
+  select,input[type=file]{width:100%;min-height:38px;padding:6px 11px;font:inherit;font-size:13px;
+    color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:9px;outline:none}
+  select{height:38px;padding:0 11px}
+  .hint{color:var(--faint);font-size:11px;margin-top:5px}
+  .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+  .cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:16px}
+  .metric{padding:10px 12px;border:1px solid var(--line-soft);border-radius:10px;background:var(--surface-2)}
+  .metric b{display:block;font-size:19px;line-height:1.3}.metric span{color:var(--muted);font-size:11px}
+  .metric.warn b{color:var(--warn)}.metric.fail b{color:var(--fail)}.metric.ok b{color:var(--ok)}
+  .note{padding:10px 12px;border-radius:9px;border:1px solid #fde68a;background:#fffbeb;
+    color:#92400e;font-size:12px;margin-bottom:14px}
+  .note.ok{border-color:#d1fae5;background:#ecfdf5;color:#047857}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{padding:0 9px 9px;text-align:left;color:var(--faint);font-size:10.5px;font-weight:700;
+    letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:8px 9px;border-bottom:1px solid var(--line-soft);vertical-align:top;word-break:break-word}
+  code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:#0369a1}
+  .status{padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:700;border:1px solid var(--line)}
+  .status.auto{color:#92400e;background:#fffbeb;border-color:#fde68a}
+  .status.manual{color:#b91c1c;background:#fef2f2;border-color:#fee2e2}
+  .hidden{display:none !important}
+  #toast{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:100;display:none;
+    max-width:min(560px,calc(100vw - 32px));padding:12px 18px;border-radius:12px;font-weight:600;font-size:13px;
+    background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);
+    box-shadow:0 20px 48px rgba(15,23,42,.22)}
+  #toast.bad{border-left-color:var(--fail);color:#b91c1c}
+  @media(max-width:900px){.cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
+  @media(max-width:640px){.grid{grid-template-columns:1fr}.field.span2{grid-column:auto}
+    .cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">SN</div>
+    <div><h1>文档一致性检查</h1><div class="sub">DOCX 接口说明 vs MIB 库 · 按 OID 比对</div></div>
+  </div>
+  <div class="nav">
+    <a class="btn" href="/mib-browser">MIB 浏览器</a>
+    <a class="btn" href="/">返回控制台</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="card">
+    <h2>选择文档与 MIB</h2>
+    <div class="grid">
+      <div class="field"><label for="checkMib">MIB</label>
+        <select id="checkMib"></select>
+        <div class="hint">比对基准；需与文档版本对应</div></div>
+      <div class="field"><label for="checkFile">DOCX 文件</label>
+        <input id="checkFile" type="file" accept=".docx">
+        <div class="hint">标准五列表格：节点 / 数据类型 / 含义 / 实现规格 / 状态</div></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn--primary" id="checkRun" type="button">开始检查</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="resultCard">
+    <h2>检查结果</h2>
+    <div class="cards" id="metrics"></div>
+    <div class="note hidden" id="resultNote"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 10px">
+      <div class="sub" id="resultMeta"></div>
+      <a class="btn hidden" id="downloadFixed" href="#">下载修正版 DOCX</a>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>类型</th><th>OID / 节点</th><th>文档值</th><th>MIB 值</th><th>处理</th></tr></thead>
+        <tbody id="findingBody"></tbody>
+      </table>
+    </div>
+    <div class="hint" id="mibOnlyHint"></div>
+  </div>
+</main>
+<div id="toast"></div>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function api(path, opts){
+    opts = opts || {};
+    opts.credentials = 'same-origin';
+    opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
+    return fetch(path, opts).then(function(r){
+      return r.json().catch(function(){ return {}; }).then(function(d){
+        if(!r.ok){ throw new Error((d && d.detail) || ('HTTP ' + r.status)); }
+        return d;
+      });
+    });
+  }
+  var toastTimer = null;
+  function toast(msg, bad){
+    var t = $('toast'); t.textContent = msg; t.className = bad ? 'bad' : '';
+    t.style.display = 'block'; clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.style.display = 'none'; }, 5000);
+  }
+  var FIELD_LABEL = {name:'名称', type:'数据类型', access:'实现规格', status:'状态', oid:'OID'};
+  function metric(label, value, tone){
+    return '<div class="metric '+(tone||'')+'"><b>'+value+'</b><span>'+label+'</span></div>';
+  }
+  function render(report){
+    var s = report.summary || {};
+    $('resultCard').classList.remove('hidden');
+    $('metrics').innerHTML =
+      metric('文档节点', s.doc_rows||0, '') +
+      metric('与 MIB 匹配', s.matched||0, 'ok') +
+      metric('类型差异', s.type_mismatch||0, (s.type_mismatch?'fail':'ok')) +
+      metric('名称差异', s.name_mismatch||0, (s.name_mismatch?'warn':'ok')) +
+      metric('自动可修正', s.auto_fixable||0, 'warn') +
+      metric('需人工确认', s.manual_review||0, (s.manual_review?'fail':'ok'));
+    $('resultMeta').textContent = report.filename + ' · ' + report.mib_module + ' · 检查 ' + report.check_id;
+    var note = $('resultNote');
+    if(!report.findings.length){
+      note.className = 'note ok'; note.textContent = '未发现文档与 MIB 的差异。';
+    } else {
+      note.className = 'note';
+      note.textContent = '类型/权限/状态差异会写入“修正版 DOCX”；名称与 OID 差异仅提示，需人工确认。';
+    }
+    $('findingBody').innerHTML = report.findings.map(function(f){
+      return '<tr><td><span class="status '+(f.action==='update_doc'?'auto':'manual')+'">'+
+        (f.action==='update_doc'?'自动修正':'人工确认')+'</span> '+(FIELD_LABEL[f.field]||esc(f.field))+'</td>'+
+        '<td><code>'+esc(f.oid)+'</code><br><span class="sub">'+esc(f.name)+'</span></td>'+
+        '<td>'+esc(f.doc_value)+'</td><td>'+esc(f.mib_value)+'</td>'+
+        '<td class="hint">'+(f.action==='update_doc'?'改文档':'需人工判断')+'</td></tr>';
+    }).join('') || '<tr><td colspan="5" class="hint">无差异</td></tr>';
+    var dl = $('downloadFixed');
+    if(report.fixed_available){
+      dl.classList.remove('hidden');
+      dl.href = '/api/doc-check/' + report.check_id + '/fixed.docx';
+    } else {
+      dl.classList.add('hidden'); dl.removeAttribute('href');
+    }
+    var mibOnly = s.mib_only || 0;
+    $('mibOnlyHint').textContent = mibOnly
+      ? 'MIB 中有 ' + mibOnly + ' 个叶子节点未出现在文档里（文档覆盖范围差异，不计为不一致）。'
+      : '';
+  }
+  function loadMibs(){
+    api('/api/mibs').then(function(d){
+      var sel = $('checkMib');
+      sel.innerHTML = (d.mibs || []).map(function(m){
+        return '<option value="'+esc(m.mib_id)+'">'+esc(m.filename)+' · '+esc(m.module_name)+'</option>';
+      }).join('');
+      if(!d.mibs || !d.mibs.length){
+        sel.innerHTML = '<option value="">暂无 MIB，请先上传</option>';
+        $('checkRun').disabled = true;
+      }
+    }).catch(function(e){ toast('加载 MIB 失败: ' + e.message, true); });
+  }
+  $('checkRun').addEventListener('click', function(){
+    var file = $('checkFile').files[0], mib = $('checkMib').value;
+    if(!mib){ toast('请先选择 MIB', true); return; }
+    if(!file){ toast('请选择 DOCX 文件', true); return; }
+    var btn = this; btn.disabled = true;
+    file.arrayBuffer().then(function(buf){
+      return fetch('/api/doc-check', {
+        method:'POST', credentials:'same-origin', body:buf,
+        headers:{'Content-Type':'application/octet-stream',
+                 'X-MIB-ID':mib, 'X-DOCX-Filename':encodeURIComponent(file.name)},
+      }).then(function(r){
+        return r.json().catch(function(){ return {}; }).then(function(d){
+          if(!r.ok){ throw new Error((d && d.detail) || ('HTTP ' + r.status)); }
+          return d;
+        });
+      });
+    }).then(function(d){ render(d.report); toast('检查完成'); })
+      .catch(function(e){ toast(e.message, true); })
+      .finally(function(){ btn.disabled = false; });
+  });
+  loadMibs();
+})();
+</script>
+</body>
+</html>

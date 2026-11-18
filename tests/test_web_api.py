@@ -8,11 +8,14 @@ import shutil
 import subprocess
 import time
 from contextlib import contextmanager
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from docx import Document
 from fastapi.testclient import TestClient
 
+from snmp_test.model.mib_model import build_model
 from snmp_test.service.app import COOKIE, create_app
 from snmp_test.service.jobs import JobStore
 
@@ -127,6 +130,62 @@ def test_dashboard_polling():
         capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_doc_check_web_flow(web):
+    client, _, _, alice, bob = web
+    rec = client.post("/api/mibs", content=STANDARD_MIB, headers=_headers(alice)).json()["mib"]
+    model = build_model(ROOT / "tests" / "fixtures" / "TEST-IF-MIB.mib")
+    index = model.node_by_name("testIfIndex")
+    descr = model.node_by_name("testIfDescr")
+
+    doc = Document()
+    table = doc.add_table(rows=1, cols=5)
+    for i, header in enumerate(("节点", "数据类型", "含义", "实现规格", "状态")):
+        table.rows[0].cells[i].text = header
+    for values in (
+        [f"{index.name} OID:{index.oid}", "Integer32", "索引", "read-only", "current"],
+        [f"{descr.name} OID:{descr.oid}", "Integer32", "描述", "read-only", "current"],
+    ):
+        cells = table.add_row().cells
+        for i, value in enumerate(values):
+            cells[i].text = value
+    buf = BytesIO()
+    doc.save(buf)
+
+    response = client.post(
+        "/api/doc-check", content=buf.getvalue(),
+        headers={
+            **_headers(alice), "Content-Type": "application/octet-stream",
+            "X-MIB-ID": rec["mib_id"], "X-DOCX-Filename": "interface.docx",
+        },
+    )
+    assert response.status_code == 200, response.text
+    report = response.json()["report"]
+    assert report["summary"]["doc_rows"] == 2
+    assert report["summary"]["type_mismatch"] == 1
+    assert report["fixed_available"] is True
+    check_id = report["check_id"]
+
+    assert client.get(f"/api/doc-check/{check_id}", headers=_headers(alice)).status_code == 200
+    assert client.get(f"/api/doc-check/{check_id}", headers=_headers(bob)).status_code == 404
+    fixed = client.get(f"/api/doc-check/{check_id}/fixed.docx", headers=_headers(alice))
+    assert fixed.status_code == 200 and fixed.content.startswith(b"PK")
+    fixed_doc = Document(BytesIO(fixed.content))
+    assert fixed_doc.tables[0].rows[2].cells[1].text == "DisplayString"
+
+    page = client.get("/doc-check", headers=_headers(alice)).text
+    for marker in ('id="checkFile"', 'id="checkMib"', 'id="downloadFixed"'):
+        assert marker in page, marker
+    assert client.get("/doc-check", headers=_headers(alice)).status_code == 200
+    with _no_cookie(client):
+        assert client.get("/doc-check", follow_redirects=False).status_code == 302
+
+    bad = client.post(
+        "/api/doc-check", content=b"not a docx",
+        headers={**_headers(alice), "X-MIB-ID": rec["mib_id"]},
+    )
+    assert bad.status_code == 400
 
 
 def test_health_and_authentication(web):

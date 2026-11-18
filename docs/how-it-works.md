@@ -376,7 +376,7 @@ GET /runs/{run_id}/report.html -> 带鉴权的静态报告
 
 ### 11.4 已验证与仍是 MVP 的部分
 
-已验证（全量 `pytest` 共 220 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
+已验证（全量 `pytest` 共 223 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
 
 仍是 MVP、生产前需替换：
 

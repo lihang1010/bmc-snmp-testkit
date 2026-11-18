@@ -20,6 +20,7 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import yaml
 from fastapi import FastAPI, HTTPException, Request
@@ -31,6 +32,7 @@ from starlette.concurrency import run_in_threadpool
 
 from snmp_test.service.audit import AuditFeed
 from snmp_test.service.auth import AuthError, AuthService, Mailer, SESSION_TTL_SECONDS, User
+from snmp_test.service.doc_check import DocCheckError, DocCheckService
 from snmp_test.service.jobs import JobRunner, JobStore
 from snmp_test.service.mibs import MibError, MibLibrary
 from snmp_test.service.probe import ProbeError, ProbeService
@@ -194,6 +196,7 @@ def create_app(
         probe=probe,
     )
     audit_feed = AuditFeed(workspace)
+    doc_checks = DocCheckService(workspace, library)
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
     @asynccontextmanager
@@ -214,6 +217,7 @@ def create_app(
     app.state.store = store
     app.state.runner = runner
     app.state.probe = probe
+    app.state.doc_checks = doc_checks
     app.state.security = security_cfg
     app.state.workspace = workspace
     app.state.templates = templates
@@ -303,6 +307,44 @@ def create_app(
     async def auth_me(request: Request):
         user = require(request)
         return {"user": user.email, "email": user.email, "role": user.role}
+
+    @app.post("/api/doc-check")
+    async def create_doc_check(request: Request):
+        user = require(request)
+        mib_id = request.headers.get("x-mib-id", "").strip()
+        filename = unquote(request.headers.get("x-docx-filename", "document.docx"))
+        content = await request.body()
+        try:
+            report = doc_checks.create(filename, content, mib_id, user.email)
+        except DocCheckError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        store.audit_log({
+            "event": "doc_check", "user": user.email, "mib_id": mib_id,
+            "filename": report["filename"], "check_id": report["check_id"],
+            "summary": report["summary"],
+        })
+        return {"report": report}
+
+    @app.get("/api/doc-check/{check_id}")
+    async def get_doc_check(check_id: str, request: Request):
+        user = require(request)
+        try:
+            return doc_checks.get(check_id, user.email)
+        except DocCheckError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/api/doc-check/{check_id}/fixed.docx")
+    async def download_doc_check(check_id: str, request: Request):
+        user = require(request)
+        try:
+            path = doc_checks.fixed_path(check_id, user.email)
+        except DocCheckError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return FileResponse(
+            path,
+            filename=f"{path.parent.name}-fixed.docx",
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
     @app.post("/api/mail/test")
     async def mail_test(request: Request):
@@ -790,6 +832,14 @@ def create_app(
             )
         return templates.TemplateResponse(
             request, "mail_settings.html", {"title": "邮件设置 · bmc-snmp-testkit"}
+        )
+
+    @app.get("/doc-check", response_class=HTMLResponse)
+    async def doc_check_page(request: Request):
+        if auth.authenticate(_token(request)) is None:
+            return RedirectResponse("/login", status_code=302)
+        return templates.TemplateResponse(
+            request, "doc_check.html", {"title": "文档一致性检查 · bmc-snmp-testkit"}
         )
 
     @app.get("/", response_class=HTMLResponse)
