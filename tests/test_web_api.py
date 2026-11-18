@@ -722,7 +722,7 @@ def test_mib_browser_page_and_tree_api(web):
     assert all(t in js.text for t in (
         "loadTree", "formatValue", "exportCsv", "contextmenu",
         "openSetDialog", "instanceRows", "childrenOf",
-        "dblclick", "probeNode", "setProbeStatus", "writableNode",
+        "dblclick", "probeNode", "setProbeStatus", "writableNode", "requireTargetHost",
     ))
 
     # Debug console and the "local self-test" switch are gone from the web UI.

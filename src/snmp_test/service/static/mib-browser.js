@@ -727,7 +727,14 @@
     }).catch(function(){ /* keep buttons usable if capabilities are unavailable */ });
   }
   function closeSetDialog(){ $('setDialog').classList.add('hidden'); }
+  function requireTargetHost(){
+    if($('host').value.trim()) return true;
+    toast('请先填写目标 IP', true);
+    return false;
+  }
+
   function openSetDialog(oid){
+    if(!requireTargetHost()) return;
     if(!oid){ toast('请先选择节点或填写 OID', true); return; }
     if($('setBtn').disabled){ toast('服务策略已禁用 live SET', true); return; }
     var node = writableNode(oid);
@@ -823,6 +830,7 @@
     }
     else if(act === 'next'){ $('oid').value = oid; runProbe('GETNEXT', oid); }
     else if(act === 'set'){
+      if(!requireTargetHost()) return;
       if(ctxNode.__synthetic){ toast('请对具体的标量/列节点执行 SET', true); return; }
       openSetDialog((ctxNode.kind === 'scalar') ? oid + '.0' : oid);
     }
