@@ -23,6 +23,8 @@ from snmp_test.service.mibs import MibError, MibLibrary
 
 CHECK_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 OID_RE = re.compile(r"([0-9]+(?:\.[0-9]+)+)")
+NOTE_RE = re.compile(r"^\s*备注\s*([0-9]+)\s*[:：]\s*(.+)$")
+NOTE_REF_RE = re.compile(r"备注\s*([0-9]+)")
 MAX_DOCX_BYTES = 20 * 1024 * 1024
 HEADERS = ("节点", "数据类型", "含义", "实现规格", "状态")
 FIELD_INDEX = {"type": 1, "access": 3, "status": 4}
@@ -117,9 +119,24 @@ def parse_docx(path: str | Path) -> list[DocRow]:
     return rows
 
 
+def extract_notes(path: str | Path) -> dict[str, str]:
+    """Collect ``备注N：...`` paragraphs so referenced notes can be shown."""
+    try:
+        document = Document(str(path))
+    except Exception:
+        return {}
+    notes: dict[str, str] = {}
+    for paragraph in document.paragraphs:
+        text = " ".join((paragraph.text or "").split())
+        match = NOTE_RE.match(text)
+        if match:
+            notes[match.group(1)] = match.group(2)
+    return notes
+
+
 def _finding(row: DocRow, field: str, doc_value: Any, mib_value: Any, *,
-             action: str, severity: str) -> dict[str, Any]:
-    return {
+             action: str, severity: str, note: str = "") -> dict[str, Any]:
+    result = {
         "oid": row.oid,
         "name": row.name,
         "field": field,
@@ -130,9 +147,15 @@ def _finding(row: DocRow, field: str, doc_value: Any, mib_value: Any, *,
         "table_index": row.table_index,
         "row_index": row.row_index,
     }
+    if note:
+        result["note"] = note
+    return result
 
 
-def compare_rows(rows: list[DocRow], model: MibModel) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def compare_rows(
+    rows: list[DocRow], model: MibModel, notes: dict[str, str] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    notes = notes or {}
     nodes = {n.oid: n for n in model.nodes if n.kind in ("scalar", "column")}
     findings: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -157,8 +180,13 @@ def compare_rows(rows: list[DocRow], model: MibModel) -> tuple[list[dict[str, An
                 row, "type", row.dtype, mib_type, action="update_doc", severity="error",
             ))
         if row.access.lower() not in ACCESS_VALUES:
+            refs = NOTE_REF_RE.findall(row.access)
+            note = "；".join(
+                f"备注{ref}：{notes[ref]}" for ref in refs if ref in notes
+            )
             findings.append(_finding(
-                row, "access", row.access, node.access, action="manual", severity="warning",
+                row, "access", row.access, node.access,
+                action="manual", severity="warning", note=note,
             ))
         elif row.access.lower() != node.access:
             findings.append(_finding(
@@ -249,7 +277,7 @@ class DocCheckService:
         except Exception:
             shutil.rmtree(folder, ignore_errors=True)
             raise
-        findings, details = compare_rows(rows, model)
+        findings, details = compare_rows(rows, model, extract_notes(source))
         fixed_name = ""
         if any(f["action"] == "update_doc" for f in findings):
             fixed = folder / "fixed.docx"

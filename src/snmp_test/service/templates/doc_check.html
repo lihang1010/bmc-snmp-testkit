@@ -158,7 +158,8 @@
       return '<tr><td><span class="status '+(f.action==='update_doc'?'auto':'manual')+'">'+
         (f.action==='update_doc'?'自动修正':'人工确认')+'</span> '+(FIELD_LABEL[f.field]||esc(f.field))+'</td>'+
         '<td><code>'+esc(f.oid)+'</code><br><span class="sub">'+esc(f.name)+'</span></td>'+
-        '<td>'+esc(f.doc_value)+'</td><td>'+esc(f.mib_value)+'</td>'+
+        '<td>'+esc(f.doc_value)+(f.note?'<div class="hint" style="margin-top:4px">'+esc(f.note)+'</div>':'')+'</td>'+
+        '<td>'+esc(f.mib_value)+'</td>'+
         '<td class="hint">'+(f.action==='update_doc'?'改文档':'需人工判断')+'</td></tr>';
     }).join('') || '<tr><td colspan="5" class="hint">无差异</td></tr>';
     var dl = $('downloadFixed');

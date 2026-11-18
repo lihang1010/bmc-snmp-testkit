@@ -8,6 +8,7 @@ from snmp_test.model.mib_model import build_model
 from snmp_test.service.doc_check import (
     apply_fixes,
     compare_rows,
+    extract_notes,
     parse_docx,
 )
 
@@ -42,13 +43,16 @@ def _rows() -> list[list[str]]:
 
 def test_parse_compare_and_fix_docx(tmp_path: Path):
     source = _document(tmp_path / "source.docx", _rows())
+    document = Document(source)
+    document.add_paragraph("备注1：只有 web 服务该项具有 read-write 属性。")
+    document.save(source)
     parsed = parse_docx(source)
     assert len(parsed) == 6
     assert parsed[0].name == "testIfIndex"
     assert parsed[0].oid == "1.3.6.1.2.1.999.1.1.1.1"
 
     model = build_model(FIXTURE)
-    findings, details = compare_rows(parsed, model)
+    findings, details = compare_rows(parsed, model, extract_notes(source))
     summary = details["summary"]
     assert summary["doc_rows"] == 6
     assert summary["matched"] == 4
@@ -58,6 +62,10 @@ def test_parse_compare_and_fix_docx(tmp_path: Path):
     assert summary["access_mismatch"] == 1
     assert summary["auto_fixable"] == 2
     assert summary["manual_review"] == 5
+    access_note = next(
+        f for f in findings if f["field"] == "access" and f["oid"].endswith(".1.3")
+    )
+    assert access_note["note"] == "备注1：只有 web 服务该项具有 read-write 属性。"
 
     fixed = tmp_path / "fixed.docx"
     assert apply_fixes(source, fixed, parsed, findings) == 2
