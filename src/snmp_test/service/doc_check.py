@@ -12,6 +12,7 @@ import re
 import shutil
 import time
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -197,11 +198,39 @@ def compare_rows(
                 row, "status", row.status, node.status, action="update_doc", severity="warning",
             ))
     mib_only = sorted(set(nodes) - seen)
+    documented_tables = {
+        nodes[oid].table_name for oid in (seen & set(nodes))
+        if nodes[oid].kind == "column" and nodes[oid].table_name
+    }
+    column_sets: dict[str | None, list] = {}
+    for node in nodes.values():
+        column_sets.setdefault(node.table_name, []).append(node)
+
+    def shape(table: str | None) -> tuple:
+        return tuple(
+            (n.syntax.base_type if n.syntax else "", n.access)
+            for n in sorted(column_sets.get(table) or [], key=lambda n: n.oid)
+        )
+
+    documented_shapes = {shape(table) for table in documented_tables}
+    missing_by_table = Counter(nodes[oid].table_name for oid in mib_only)
+    groups = []
+    for table, count in missing_by_table.most_common():
+        covered = table is not None and shape(table) in documented_shapes
+        groups.append({
+            "table": table or "(scalar)",
+            "count": count,
+            "template_covered": covered,
+        })
+    template_covered = sum(g["count"] for g in groups if g["template_covered"])
+    uncovered = len(mib_only) - template_covered
     summary = {
         "doc_rows": len(rows),
         "matched": len(seen & set(nodes)),
         "doc_only": sum(1 for f in findings if f["field"] == "oid" and f["mib_value"] == "MIB 中不存在"),
         "mib_only": len(mib_only),
+        "mib_only_template": template_covered,
+        "mib_only_uncovered": uncovered,
         "name_mismatch": sum(1 for f in findings if f["field"] == "name"),
         "type_mismatch": sum(1 for f in findings if f["field"] == "type"),
         "access_mismatch": sum(1 for f in findings if f["field"] == "access"),
@@ -209,7 +238,11 @@ def compare_rows(
         "auto_fixable": sum(1 for f in findings if f["action"] == "update_doc"),
         "manual_review": sum(1 for f in findings if f["action"] == "manual"),
     }
-    return findings, {"summary": summary, "mib_only_sample": mib_only[:20]}
+    return findings, {
+        "summary": summary,
+        "mib_only_sample": mib_only[:20],
+        "mib_only_groups": groups[:30],
+    }
 
 
 def _rewrite_cell(cell: Any, value: str) -> None:

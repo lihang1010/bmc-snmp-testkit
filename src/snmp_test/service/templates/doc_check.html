@@ -170,9 +170,21 @@
       dl.classList.add('hidden'); dl.removeAttribute('href');
     }
     var mibOnly = s.mib_only || 0;
-    $('mibOnlyHint').textContent = mibOnly
-      ? 'MIB 中有 ' + mibOnly + ' 个叶子节点未出现在文档里（文档覆盖范围差异，不计为不一致）。'
-      : '';
+    var templateCovered = s.mib_only_template || 0;
+    var uncovered = s.mib_only_uncovered || 0;
+    if(mibOnly){
+      var uncoveredGroups = (report.mib_only_groups || []).filter(function(g){ return !g.template_covered; });
+      var tableHint = uncoveredGroups.slice(0, 6).map(function(g){
+        return g.table + '（' + g.count + '）';
+      }).join('、');
+      $('mibOnlyHint').textContent = uncovered
+        ? 'MIB 中还有 ' + mibOnly + ' 个叶子节点未逐行列出：' + templateCovered +
+          ' 个来自与已文档化表结构相同的同构表（可视为省略），' + uncovered +
+          ' 个未覆盖' + (tableHint ? '：' + tableHint : '') + '，建议补充文档。'
+        : 'MIB 中还有 ' + mibOnly + ' 个叶子节点来自同构表，结构已在文档其他表中描述，可视为省略。';
+    } else {
+      $('mibOnlyHint').textContent = '';
+    }
   }
   function loadMibs(){
     api('/api/mibs').then(function(d){

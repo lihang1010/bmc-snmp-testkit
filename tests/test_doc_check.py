@@ -5,7 +5,9 @@ from pathlib import Path
 from docx import Document
 
 from snmp_test.model.mib_model import build_model
+from snmp_test.model.types import MibModel, MibNode, SyntaxSpec
 from snmp_test.service.doc_check import (
+    DocRow,
     apply_fixes,
     compare_rows,
     extract_notes,
@@ -88,3 +90,36 @@ def test_parse_rejects_document_without_interface_tables(tmp_path: Path):
         assert "没有找到" in str(exc)
     else:
         raise AssertionError("document without interface tables must be rejected")
+
+
+def _column(name: str, oid: str, table: str, base: str, sub_id: int) -> MibNode:
+    return MibNode(
+        name=name, oid=oid, kind="column", access="read-only",
+        syntax=SyntaxSpec(base_type=base), table_name=table,
+        parent_name="entry", sub_id=sub_id,
+    )
+
+
+def test_mib_only_groups_split_templates_from_real_gaps():
+    nodes = [
+        _column("idxA", "1.3.6.1.4.1.1.1.1.1", "tblA", "Integer32", 1),
+        _column("valA", "1.3.6.1.4.1.1.1.1.2", "tblA", "DisplayString", 2),
+        _column("idxB", "1.3.6.1.4.1.1.2.1.1", "tblB", "Integer32", 1),
+        _column("valB", "1.3.6.1.4.1.1.2.1.2", "tblB", "DisplayString", 2),
+        _column("x", "1.3.6.1.4.1.1.3.1.1", "tblC", "Integer32", 1),
+        _column("y", "1.3.6.1.4.1.1.3.1.2", "tblC", "Integer32", 2),
+        _column("z", "1.3.6.1.4.1.1.3.1.3", "tblC", "Integer32", 3),
+    ]
+    model = MibModel(nodes=nodes).reindex()
+    documented = [
+        DocRow("idxA", "1.3.6.1.4.1.1.1.1.1", "Integer32", "", "read-only", "current", 0, 1),
+        DocRow("valA", "1.3.6.1.4.1.1.1.1.2", "DisplayString", "", "read-only", "current", 0, 2),
+    ]
+    _, details = compare_rows(documented, model)
+    summary = details["summary"]
+    assert summary["mib_only"] == 5
+    assert summary["mib_only_template"] == 2  # tblB has the same shape as tblA
+    assert summary["mib_only_uncovered"] == 3  # tblC has a different shape
+    groups = {g["table"]: g for g in details["mib_only_groups"]}
+    assert groups["tblB"]["template_covered"] is True
+    assert groups["tblC"]["template_covered"] is False
