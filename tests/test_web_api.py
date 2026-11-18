@@ -210,6 +210,72 @@ def test_mail_test_endpoint(web, monkeypatch):
     assert sent == [ALICE]
 
 
+def test_mail_settings_page_and_api(tmp_path, monkeypatch):
+    for name in (
+        "SNMP_TEST_SMTP_HOST", "SNMP_TEST_SMTP_PORT", "SNMP_TEST_SMTP_USER",
+        "SNMP_TEST_SMTP_PASSWORD", "SNMP_TEST_SMTP_FROM", "SNMP_TEST_SMTP_TLS",
+        "SNMP_TEST_SMTP_SSL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    root = tmp_path / "mailcfg"
+    app = _make_app(root)
+    email = "mailcfg@example.com"
+    with TestClient(app) as client:
+        alice = _register(client, email)
+
+        with _no_cookie(client):
+            assert client.get("/mail-settings", follow_redirects=False).status_code == 302
+        page = client.get("/mail-settings", headers=_headers(alice))
+        assert page.status_code == 200
+        for marker in ('id="mailHost"', 'id="mailPassword"', 'id="mailSaveBtn"', 'id="mailTestBtn"'):
+            assert marker in page.text, marker
+        assert 'id="mailSettingsLink"' in client.get("/", headers=_headers(alice)).text
+
+        initial = client.get("/api/mail/settings", headers=_headers(alice)).json()
+        assert "password" not in initial and initial["configured"] is False
+
+        saved = client.put(
+            "/api/mail/settings", headers=_headers(alice),
+            json={
+                "host": "smtp.test", "port": 2525, "user": "sender@test",
+                "password": "secret-code", "sender": "sender@test", "tls": True, "ssl": False,
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        body = saved.json()
+        assert body["host"] == "smtp.test" and body["port"] == 2525
+        assert body["configured"] is True and body["has_password"] is True and body["env_override"] is False
+        assert "secret-code" not in saved.text
+
+        mail_file = root / "work" / "mail.yaml"
+        assert mail_file.is_file() and "secret-code" in mail_file.read_text(encoding="utf-8")
+        assert (mail_file.stat().st_mode & 0o777) == 0o600
+
+        kept = client.put(
+            "/api/mail/settings", headers=_headers(alice),
+            json={"host": "smtp.test", "port": 2525, "user": "sender@test",
+                  "password": "", "sender": "sender@test", "tls": True, "ssl": False},
+        )
+        assert kept.status_code == 200
+        assert app.state.auth.mailer.password == "secret-code", "blank password must keep the saved one"
+
+        sent = []
+        monkeypatch.setattr(
+            app.state.auth.mailer, "_send",
+            lambda to, subject, body: sent.append(to) is None,
+        )
+        tested = client.post("/api/mail/test", headers=_headers(alice))
+        assert tested.status_code == 200 and sent == [email]
+
+        monkeypatch.setenv("SNMP_TEST_SMTP_HOST", "env.example.com")
+        assert client.get("/api/mail/settings", headers=_headers(alice)).json()["env_override"] is True
+        bad = client.put(
+            "/api/mail/settings", headers=_headers(alice),
+            json={"host": "smtp.test", "port": 70000},
+        )
+        assert bad.status_code == 400
+
+
 def test_auth_validation(web):
     client, _, _, alice, _ = web
     assert client.post("/api/auth/code", json={"email": "not-an-email", "purpose": "register"}).status_code == 400

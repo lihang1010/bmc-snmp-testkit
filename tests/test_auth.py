@@ -190,3 +190,39 @@ def test_mailer_test_message_requires_configuration(tmp_path, monkeypatch):
     auth = AuthService(tmp_path / "auth.db", dev_bypass=False, mail_settings={})
     with pytest.raises(AuthError, match="未配置 SMTP"):
         auth.mailer.send_test("user@example.com")
+
+
+def test_mailer_sends_through_smtp_ssl(monkeypatch):
+    for name in ("SNMP_TEST_SMTP_HOST", "SNMP_TEST_SMTP_SSL", "SNMP_TEST_SMTP_TLS"):
+        monkeypatch.delenv(name, raising=False)
+    calls = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=10):
+            calls["connect"] = (host, port)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def starttls(self):
+            calls["starttls"] = True
+
+        def login(self, user, password):
+            calls["login"] = (user, password)
+
+        def send_message(self, message):
+            calls["message"] = message
+
+    monkeypatch.setattr(auth_module.smtplib, "SMTP_SSL", FakeSMTP)
+    mailer = Mailer({
+        "host": "smtp.test", "port": 465, "user": "sender@test",
+        "password": "secret", "sender": "sender@test", "ssl": True, "tls": False,
+    })
+    mailer.send_test("to@test")
+    assert calls["connect"] == ("smtp.test", 465)
+    assert calls["login"] == ("sender@test", "secret")
+    assert calls["message"]["To"] == "to@test"
+    assert "starttls" not in calls

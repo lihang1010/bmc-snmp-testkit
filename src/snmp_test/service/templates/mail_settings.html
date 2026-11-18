@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  :root{--bg:#f4f7fb;--surface:#fff;--surface-2:#f8fafc;--field:#fff;--line:#e2e8f0;--line-soft:#eef2f7;
+    --text:#0f172a;--muted:#64748b;--faint:#94a3b8;--accent:#0284c7;--ok:#059669;--warn:#d97706;--fail:#dc2626}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;color:var(--text);background:var(--bg);
+    font:14px/1.6 "Inter",ui-sans-serif,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
+    padding:12px clamp(16px,3vw,32px);background:rgba(255,255,255,.9);border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand-mark{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-weight:800;
+    font-size:11px;color:#fff;background:linear-gradient(135deg,#0ea5e9,#06b6d4)}
+  h1{font-size:16px;margin:0}.sub{color:var(--muted);font-size:11.5px;margin-top:2px}
+  .nav{display:flex;gap:9px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;justify-content:center;height:34px;padding:0 14px;border-radius:9px;
+    border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;font-size:12.5px;
+    font-weight:650;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s,opacity .15s}
+  .btn:hover:not(:disabled){background:var(--surface-2);border-color:#cbd5e1}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn--primary{color:#fff;border-color:transparent;background:linear-gradient(135deg,#0ea5e9,#06b6d4)}
+  .wrap{max-width:860px;margin:28px auto 60px;padding:0 16px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 10px 30px rgba(15,23,42,.05);padding:24px}
+  .card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+  h2{font-size:15px;margin:0}
+  .state{padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;border:1px solid var(--line);
+    color:var(--muted);background:var(--surface-2)}
+  .state.ok{color:#047857;background:#ecfdf5;border-color:#d1fae5}
+  .state.warn{color:#92400e;background:#fffbeb;border-color:#fde68a}
+  .note{margin:0 0 18px;padding:10px 12px;border-radius:9px;border:1px solid #fde68a;
+    background:#fffbeb;color:#92400e;font-size:11.5px;line-height:1.65}
+  .note.hidden{display:none}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:13px 16px}
+  .field.span2{grid-column:1 / -1}
+  label{display:block;color:var(--muted);font-size:11.5px;font-weight:600;margin:0 0 6px}
+  input[type=text],input[type=password],input[type=number]{width:100%;height:38px;padding:0 11px;font:inherit;
+    font-size:13px;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:9px;outline:none}
+  input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(2,132,199,.12)}
+  .hint{display:block;color:var(--faint);font-size:11px;margin-top:5px}
+  .checks{display:flex;gap:22px;align-items:center;padding-top:6px}
+  .checks label{display:inline-flex;align-items:center;gap:7px;margin:0;color:var(--text);font-size:12.5px;cursor:pointer}
+  .checks input{width:15px;height:15px;accent-color:var(--accent)}
+  .actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:22px;
+    padding-top:16px;border-top:1px solid var(--line-soft)}
+  #toast{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:100;display:none;
+    max-width:min(520px,calc(100vw - 32px));padding:12px 18px;border-radius:12px;font-weight:600;font-size:13px;
+    background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);
+    box-shadow:0 20px 48px rgba(15,23,42,.22)}
+  #toast.bad{border-left-color:var(--fail);color:#b91c1c}
+  @media(max-width:640px){.grid{grid-template-columns:1fr}.field.span2{grid-column:auto}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">SN</div>
+    <div><h1>邮件设置</h1><div class="sub">SMTP 发件配置 · 保存后立即生效</div></div>
+  </div>
+  <div class="nav">
+    <a class="btn" href="/mib-browser">MIB 浏览器</a>
+    <a class="btn" href="/">返回控制台</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="card">
+    <div class="card-head">
+      <h2>SMTP 服务器</h2>
+      <span class="state" id="mailState">加载中…</span>
+    </div>
+    <div class="note hidden" id="envNote">
+      当前进程设置了 <code>SNMP_TEST_SMTP_HOST</code> 等环境变量，环境变量优先级最高；
+      在这里保存的值要等去掉环境变量并重启后才会生效。
+    </div>
+    <div class="grid">
+      <div class="field"><label for="mailHost">SMTP 地址</label>
+        <input id="mailHost" type="text" placeholder="smtp.qq.com">
+        <span class="hint">留空表示未配置，回到开发模式</span></div>
+      <div class="field"><label for="mailPort">端口</label>
+        <input id="mailPort" type="number" min="1" max="65535" value="587">
+        <span class="hint">SSL 常用 465；STARTTLS 常用 587</span></div>
+      <div class="field"><label for="mailUser">账号</label>
+        <input id="mailUser" type="text" placeholder="发件邮箱账号">
+        <span class="hint">QQ 邮箱填完整地址，密码用授权码</span></div>
+      <div class="field"><label for="mailPassword">密码 / 授权码</label>
+        <input id="mailPassword" type="password" placeholder="留空保持不变">
+        <span class="hint" id="mailPasswordHint">不会回显已保存的密码</span></div>
+      <div class="field span2"><label for="mailSender">发件人</label>
+        <input id="mailSender" type="text" placeholder="默认与账号相同">
+        <span class="hint">多数邮件服务要求发件人与登录账号一致</span></div>
+      <div class="field span2 checks">
+        <label><input id="mailTls" type="checkbox" checked> STARTTLS（587 端口）</label>
+        <label><input id="mailSsl" type="checkbox"> SSL / SMTPS（465 端口）</label>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="mailTestBtn" type="button">保存并发送测试邮件</button>
+      <button class="btn btn--primary" id="mailSaveBtn" type="button">保存设置</button>
+    </div>
+  </div>
+</main>
+<div id="toast"></div>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function api(path, opts){
+    opts = opts || {};
+    opts.credentials = 'same-origin';
+    opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
+    return fetch(path, opts).then(function(r){
+      return r.json().catch(function(){ return {}; }).then(function(d){
+        if(!r.ok){ throw new Error((d && d.detail) || ('HTTP ' + r.status)); }
+        return d;
+      });
+    });
+  }
+  var toastTimer = null;
+  function toast(msg, bad){
+    var t = $('toast');
+    t.textContent = msg; t.className = bad ? 'bad' : '';
+    t.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.style.display = 'none'; }, 4200);
+  }
+  function fill(d){
+    $('mailHost').value = d.host || '';
+    $('mailPort').value = d.port || 587;
+    $('mailUser').value = d.user || '';
+    $('mailSender').value = d.sender || '';
+    $('mailPassword').value = '';
+    $('mailPasswordHint').textContent = d.has_password
+      ? '已保存密码；留空则保持不变' : '尚未保存密码';
+    $('mailTls').checked = !!d.tls;
+    $('mailSsl').checked = !!d.ssl;
+    $('envNote').classList.toggle('hidden', !d.env_override);
+    var state = $('mailState');
+    state.textContent = d.configured ? '已配置' : '未配置（开发模式）';
+    state.className = 'state ' + (d.configured ? 'ok' : 'warn');
+  }
+  function payload(){
+    return {
+      host: $('mailHost').value.trim(),
+      port: parseInt($('mailPort').value || '587', 10),
+      user: $('mailUser').value.trim(),
+      password: $('mailPassword').value,
+      sender: $('mailSender').value.trim(),
+      tls: $('mailTls').checked,
+      ssl: $('mailSsl').checked,
+    };
+  }
+  function save(quiet){
+    return api('/api/mail/settings', {method:'PUT', body:JSON.stringify(payload())})
+      .then(function(d){ fill(d); if(!quiet) toast('邮件设置已保存'); return d; });
+  }
+  $('mailSaveBtn').addEventListener('click', function(){
+    var btn = this; btn.disabled = true;
+    save(false).catch(function(e){ toast(e.message, true); }).finally(function(){ btn.disabled = false; });
+  });
+  $('mailTestBtn').addEventListener('click', function(){
+    var btn = this; btn.disabled = true;
+    save(true)
+      .then(function(){ return api('/api/mail/test', {method:'POST'}); })
+      .then(function(d){ toast('测试邮件已发送到 ' + d.to); })
+      .catch(function(e){ toast(e.message, true); })
+      .finally(function(){ btn.disabled = false; });
+  });
+  api('/api/mail/settings').then(fill).catch(function(e){
+    toast('加载邮件设置失败: ' + e.message, true);
+    $('mailState').textContent = '加载失败';
+  });
+})();
+</script>
+</body>
+</html>

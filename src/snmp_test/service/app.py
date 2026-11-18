@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from snmp_test.service.audit import AuditFeed
-from snmp_test.service.auth import AuthError, AuthService, SESSION_TTL_SECONDS, User
+from snmp_test.service.auth import AuthError, AuthService, Mailer, SESSION_TTL_SECONDS, User
 from snmp_test.service.jobs import JobRunner, JobStore
 from snmp_test.service.mibs import MibError, MibLibrary
 from snmp_test.service.probe import ProbeError, ProbeService
@@ -72,6 +72,16 @@ class ResetRequest(BaseModel):
     password: str
 
 
+class MailSettingsRequest(BaseModel):
+    host: str = ""
+    port: int = 587
+    user: str = ""
+    password: str = ""
+    sender: str = ""
+    tls: bool = True
+    ssl: bool = False
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str | None = None
@@ -108,6 +118,37 @@ def _mail_settings(config_path: Path) -> dict[str, Any]:
     return dict(raw.get("mail") or {})
 
 
+def _read_yaml(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        return {}
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _mail_override_path(workspace: Path) -> Path:
+    return workspace / "work" / "mail.yaml"
+
+
+def _load_mail_config(workspace: Path, config_path: Path) -> dict[str, Any]:
+    merged = _mail_settings(config_path)
+    merged.update(_read_yaml(_mail_override_path(workspace)))
+    return merged
+
+
+def _save_mail_config(workspace: Path, updates: dict[str, Any]) -> None:
+    path = _mail_override_path(workspace)
+    current = _read_yaml(path)
+    current.update({key: value for key, value in updates.items() if value is not None})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(current, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    path.chmod(0o600)
+
+
 def _token(request: Request) -> str | None:
     header = request.headers.get("authorization", "")
     if header.lower().startswith("bearer "):
@@ -125,7 +166,7 @@ def create_app(
     security_cfg = _web_security(cfg_path)
     auth = AuthService(
         workspace / "work" / "auth.db",
-        mail_settings=_mail_settings(cfg_path),
+        mail_settings=_load_mail_config(workspace, cfg_path),
     )
     library = MibLibrary(workspace, workspace / "config" / "safety-policy.yaml")
     store = JobStore(workspace)
@@ -249,6 +290,44 @@ def create_app(
         except AuthError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"sent": True, "to": user.email}
+
+    def mail_status() -> dict[str, Any]:
+        mailer = auth.mailer
+        return {
+            "host": mailer.host,
+            "port": mailer.port,
+            "user": mailer.username,
+            "sender": mailer.sender,
+            "tls": mailer.starttls,
+            "ssl": mailer.use_ssl,
+            "configured": mailer.configured,
+            "has_password": bool(mailer.password),
+            "env_override": bool(os.environ.get("SNMP_TEST_SMTP_HOST", "").strip()),
+        }
+
+    @app.get("/api/mail/settings")
+    async def get_mail_settings(request: Request):
+        require(request)
+        return mail_status()
+
+    @app.put("/api/mail/settings")
+    async def put_mail_settings(payload: MailSettingsRequest, request: Request):
+        require(request, "write")
+        if not (1 <= payload.port <= 65535):
+            raise HTTPException(400, "端口必须在 1–65535 之间")
+        updates = {
+            "host": payload.host.strip(),
+            "port": payload.port,
+            "user": payload.user.strip(),
+            "sender": payload.sender.strip(),
+            "tls": payload.tls,
+            "ssl": payload.ssl,
+        }
+        if payload.password:
+            updates["password"] = payload.password
+        _save_mail_config(workspace, updates)
+        auth.mailer = Mailer(_load_mail_config(workspace, cfg_path))
+        return mail_status()
 
     # Kept for the console page's polling code.
     @app.get("/api/session")
@@ -675,6 +754,14 @@ def create_app(
             return RedirectResponse("/login", status_code=302)
         return templates.TemplateResponse(
             request, "mib_browser.html", {"title": "MIB 浏览器 · bmc-snmp-testkit"}
+        )
+
+    @app.get("/mail-settings", response_class=HTMLResponse)
+    async def mail_settings_page(request: Request):
+        if auth.authenticate(_token(request)) is None:
+            return RedirectResponse("/login", status_code=302)
+        return templates.TemplateResponse(
+            request, "mail_settings.html", {"title": "邮件设置 · bmc-snmp-testkit"}
         )
 
     @app.get("/", response_class=HTMLResponse)

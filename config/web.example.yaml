@@ -26,7 +26,8 @@
 # 旧的顶层 security.allow_live / allowed_targets 与 auth.users 属于历史模板，不再读取。
 # 被策略拒绝的操作也写入审计（policy_denied）。
 
-# 邮件（可选；环境变量 SNMP_TEST_SMTP_* 优先于这里的值）。
+# 邮件（可选；环境变量 SNMP_TEST_SMTP_* 优先级最高）。
+# 登录后「邮件设置」页面保存到 work/mail.yaml，优先级高于本文件这段配置。
 # 含明文密码的 config/web.yaml 不要提交到仓库。
 # mail:
 #   host: smtp.example.com
