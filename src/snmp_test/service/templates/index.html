@@ -388,8 +388,8 @@
       <div class="card">
         <div class="card-head"><span class="card-idx">04</span><h2>任务队列</h2><span class="pill">仅显示我的任务</span></div>
         <div class="table-scroll">
-          <table><thead><tr><th>任务</th><th>用户 / MIB</th><th>目标</th><th>状态</th><th>结果</th><th>报告</th><th>操作</th></tr></thead>
-          <tbody id="jobBody"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody></table>
+          <table><thead><tr><th>任务</th><th>用户 / MIB</th><th>目标</th><th>状态</th><th>执行时间</th><th>结果</th><th>报告</th><th>操作</th></tr></thead>
+          <tbody id="jobBody"><tr><td colspan="8" class="muted">加载中…</td></tr></tbody></table>
         </div>
       </div>
     </section>
@@ -949,6 +949,29 @@
     return '<span class="status status--'+cls+'">'+esc(STATUS_LABEL[s] || s)+'</span>';
   }
 
+  function fmtClock(ts){
+    if(!ts) return '—';
+    return new Date(ts * 1000).toLocaleTimeString('zh-CN', {hour12:false});
+  }
+  function fmtElapsed(seconds){
+    seconds = Math.max(0, Math.round(seconds));
+    if(seconds < 60) return seconds + ' 秒';
+    var minutes = Math.floor(seconds / 60), rest = seconds % 60;
+    if(minutes < 60) return minutes + ' 分' + (rest ? ' ' + rest + ' 秒' : '');
+    var hours = Math.floor(minutes / 60);
+    return hours + ' 小时 ' + (minutes % 60) + ' 分';
+  }
+  function jobTime(j){
+    if(j.status === 'queued') return '<span class="muted">排队中</span>';
+    if(j.status === 'waiting' && !j.started_at) return '<span class="muted">等待目标</span>';
+    var start = j.started_at || j.created_at;
+    if(!start) return '—';
+    var end = j.finished_at || (j.status === 'running' ? Date.now() / 1000 : null);
+    var text = fmtClock(start);
+    if(end) text += '<br><span class="muted">' + (j.status === 'running' ? '已运行 ' : '用时 ') + fmtElapsed(end - start) + '</span>';
+    return text;
+  }
+
   var refreshTimer = null, refreshing = false, refreshAgain = false, sessionExpired = false;
   function refresh(){
     clearTimeout(refreshTimer);
@@ -990,7 +1013,7 @@
         }).join('');
       }).catch(function(e){ toast('加载 MIB 失败: '+e.message, true); }),
       api('/api/jobs', options).then(function(d){
-        if(!d.jobs.length){ $('jobBody').innerHTML='<tr><td colspan="7" class="muted">暂无任务</td></tr>'; return; }
+        if(!d.jobs.length){ $('jobBody').innerHTML='<tr><td colspan="8" class="muted">暂无任务</td></tr>'; return; }
         $('jobBody').innerHTML=d.jobs.map(function(j){
           if(j.status==='queued'||j.status==='waiting'||j.status==='running') pending=true;
           var p=j.progress||{}, s=j.summary||{}, rate=s.effective_pass_rate==null?0:s.effective_pass_rate;
@@ -1025,7 +1048,7 @@
           return '<tr><td><code>'+esc(j.job_id)+'</code><br><span class="muted">'+esc(j.mode)+' / '+esc(j.version)+' / '+(j.limit===0?'全量':j.limit)+'</span></td>'+
             '<td>'+esc(j.user)+'<br><span class="muted"><code>'+esc(j.mib_id)+'</code></span></td>'+
             '<td>'+esc(j.target_host)+':'+j.target_port+'</td>'+
-            '<td>'+statusCell(j.status)+'</td><td>'+result+'</td><td>'+report+'</td>'+
+            '<td>'+statusCell(j.status)+'</td><td>'+jobTime(j)+'</td><td>'+result+'</td><td>'+report+'</td>'+
             '<td class="actions">'+actions+'</td></tr>';
         }).join('');
       }).catch(function(e){ toast('加载任务失败: '+e.message, true); })

@@ -424,6 +424,7 @@ def test_readonly_job_end_to_end(web):
     job_id = r.json()["job"]["job_id"]
     job = _wait_done(client, job_id, alice)
     assert job["status"] == "done", job["message"]
+    assert job["started_at"] and job["finished_at"] and job["finished_at"] >= job["started_at"]
     assert job["case_count"] == 6, job["case_count"]
     assert job["summary"]["failed"] == 0 and job["summary"]["error"] == 0
     assert job["summary"]["effective_pass_rate"] == 100.0
@@ -452,6 +453,13 @@ def test_readonly_job_end_to_end(web):
         assert "never-store-this-secret" not in path.read_text(encoding="utf-8")
     snapshot = (root / "runs" / run_id / "config-snapshot.yaml").read_text(encoding="utf-8")
     assert "never-store-this-secret" not in snapshot
+
+
+def test_job_queue_shows_execution_time(web):
+    client, _, _, alice, _ = web
+    page = client.get("/", headers=_headers(alice)).text
+    assert "<th>执行时间</th>" in page
+    assert "function jobTime" in page and "function fmtElapsed" in page
 
 
 def test_interrupted_job_is_persisted_as_failed(tmp_path):
