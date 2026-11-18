@@ -714,7 +714,7 @@ def test_mib_browser_page_and_tree_api(web):
     assert page.status_code == 200
     assert "/static/mib-browser.js" in page.text and 'id="tree"' in page.text
     for token in ('id="exportBtn"', 'id="autoRefresh"', 'id="contextMenu"',
-                  'id="setBtn"', 'id="setDialog"', 'id="setValue"', 'data-act="set"',
+                  'id="setBtn"', 'id="setDialog"', 'id="setValue"', 'id="setAsn1"', 'data-act="set"',
                   'id="probeStatus"', 'class="spinner"'):
         assert token in page.text, token
     js = client.get("/static/mib-browser.js", headers=_headers(alice))

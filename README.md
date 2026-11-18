@@ -185,7 +185,7 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 
 **邮件配置**：设置 `SNMP_TEST_SMTP_HOST`、`SNMP_TEST_SMTP_PORT`、`SNMP_TEST_SMTP_USER`、`SNMP_TEST_SMTP_PASSWORD`、`SNMP_TEST_SMTP_FROM`（可选 `SNMP_TEST_SMTP_TLS` / `SNMP_TEST_SMTP_SSL`）后真发邮件。未配置时进入开发模式：验证码写入 `work/mail-dev.log` 并直接显示在登录页。账号、验证码与会话保存在 `work/auth.db`（SQLite），密码用 PBKDF2-HMAC-SHA256 加盐存储，会话为服务端随机 token + HttpOnly Cookie（默认 7 天）。
 
-**MIB 浏览器**（`/mib-browser`）：导入 MIB 后左侧是可展开的 OID 树（组 / 表 / 表项 / 列；WALK 之后还会挂出动态发现的实例行），右侧是结果区。填目标 IP 后**单击节点选中、双击执行探测**（标量 `GET .0`，表 / 表项 / 列 / 组 `WALK`），执行期间顶栏显示进度与转圈动画；结果默认按 MIB 表结构聚合成二维表格（行 = 实例、列 = 表列），可切换「Table View / 仅表格 / Raw（原始 OID）」。支持枚举值→文本、OID→节点名、点击行查看完整实例详情、CSV 导出、自动刷新、右键菜单与 `SET`（二次确认）。WALK 按 `cursor` 自动续页取全整表，不受单页 200 条限制（v2c / v3 用 GETBULK 批量拉取，v1 退回 GETNEXT）；同一目标的 SNMP 会话按「目标 + 版本 + 凭据」缓存复用，空闲超过 TTL 或缓存满时才关闭重建。所有操作写入 `work/probe-audit.jsonl`。探测请求携带当前选中的 `mib_id`，切换 MIB 后探测与模拟 Agent 都会使用新模型，不再默认取最近上传的 MIB。
+**MIB 浏览器**（`/mib-browser`）：导入 MIB 后左侧是可展开的 OID 树（组 / 表 / 表项 / 列；WALK 之后还会挂出动态发现的实例行），右侧是结果区。填目标 IP 后**单击节点选中、双击执行探测**（标量 `GET .0`，表 / 表项 / 列 / 组 `WALK`），执行期间顶栏显示进度与转圈动画；结果默认按 MIB 表结构聚合成二维表格（行 = 实例、列 = 表列），可切换「Table View / 仅表格 / Raw（原始 OID）」。支持枚举值→文本、OID→节点名、点击行查看完整实例详情、CSV 导出、自动刷新、右键菜单与 `SET`（弹窗内填写值与类型，二次确认）。WALK 按 `cursor` 自动续页取全整表，不受单页 200 条限制（v2c / v3 用 GETBULK 批量拉取，v1 退回 GETNEXT）；同一目标的 SNMP 会话按「目标 + 版本 + 凭据」缓存复用，空闲超过 TTL 或缓存满时才关闭重建。所有操作写入 `work/probe-audit.jsonl`。探测请求携带当前选中的 `mib_id`，切换 MIB 后探测与模拟 Agent 都会使用新模型，不再默认取最近上传的 MIB。
 
 主页面「提交只读任务」与探测面板同样固定 `live` 直连真实 BMC，目标 IP 必填；Web 界面不再提供「本地自测」开关。选择 MIB 后，「模块」下拉框会列出该 MIB 解析出的顶层模块（例如 `serverAssetInfo`、`serverStatus`），选中后执行该子树下的全部 GET / GETNEXT / GETBULK 用例；未选择模块时执行整份 MIB。模拟 Agent 仅供 CLI `snmp-test run` / `mock-agent` 与 pytest 离线回归使用——它验证解析 / 生成 / 断言 / SNMP 适配层，**不能证明真机兼容性**。
 

@@ -704,7 +704,6 @@
     if($('setBtn').disabled){ toast('服务策略已禁用 live SET', true); return; }
     pendingSetOid = oid;
     $('oid').value = oid;
-    $('setPanel').classList.remove('hidden');
     var target = ($('host').value.trim() || '(未填目标)') + ':' + ($('port').value || '161');
     $('setText').textContent = '将向 ' + target + ' 写入 ' + oid + ' = ' +
       ($('setValue').value || '(空)') + '（' + $('setAsn1').value + '）。' +
@@ -723,6 +722,9 @@
       '这会修改真实设备配置，请再次确认。';
   }
   $('setValue').addEventListener('input', refreshSetText);
+  $('setValue').addEventListener('keydown', function(e){
+    if(e.key === 'Enter'){ e.preventDefault(); $('setOk').click(); }
+  });
   $('setAsn1').addEventListener('change', refreshSetText);
   $('setOk').addEventListener('click', function(){
     var v = $('setValue').value, t = $('setAsn1').value;

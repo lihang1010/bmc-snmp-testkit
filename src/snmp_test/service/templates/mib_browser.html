@@ -70,10 +70,8 @@
   .ctx-item{padding:7px 11px;font-size:12px;border-radius:6px;cursor:pointer;color:var(--text)}
   .ctx-item:hover{background:#e0f2fe}
   .ctx-sep{height:1px;background:var(--line-soft);margin:4px 2px}
-  .set-panel{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;padding:10px clamp(14px,2.2vw,28px);
-    background:var(--surface);border-bottom:1px solid var(--line)}
-  .set-panel>div{min-width:180px;flex:0 1 240px}
-  .set-hint{font-size:11px;color:var(--muted);max-width:520px;line-height:1.6}
+  .set-fields{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:10px;margin:14px 0 2px}
+  .set-fields label{display:block;color:var(--muted);font-size:11.5px;font-weight:600;margin:0 0 6px}
   .modal{position:fixed;inset:0;z-index:70;display:grid;place-items:center;padding:20px}
   .modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.42);backdrop-filter:blur(3px)}
   .modal-card{position:relative;width:min(440px,100%);padding:24px;background:var(--surface);
@@ -222,16 +220,6 @@
   <label class="auto-refresh"><input id="autoRefresh" type="checkbox"> 自动刷新 <input id="refreshSeconds" type="number" value="10" min="2" max="600"> 秒</label>
 </div>
 
-<div class="set-panel hidden" id="setPanel">
-  <div><label for="setValue">SET 值</label><input id="setValue" placeholder="例如 1 或 abc"></div>
-  <div><label for="setAsn1">值类型</label><select id="setAsn1">
-    <option>OctetString</option><option>Integer32</option><option>IpAddress</option>
-    <option>ObjectIdentifier</option><option>TimeTicks</option>
-  </select></div>
-  <div class="set-hint">SET 会修改设备配置，每次写入均记入审计日志；服务端还会按
-    <code>config/safety-policy.yaml</code> 拒绝 hard_block / blacklist 节点。</div>
-</div>
-
 <div class="workspace" id="workspace">
   <aside class="tree-pane" id="treePane">
     <div class="pane-head">
@@ -271,6 +259,13 @@
     <div class="modal-icon">!</div>
     <div class="modal-title">确认 SET</div>
     <div class="modal-text" id="setText"></div>
+    <div class="set-fields">
+      <div><label for="setValue">SET 值</label><input id="setValue" placeholder="例如 1 或 abc"></div>
+      <div><label for="setAsn1">值类型</label><select id="setAsn1">
+        <option>OctetString</option><option>Integer32</option><option>IpAddress</option>
+        <option>ObjectIdentifier</option><option>TimeTicks</option>
+      </select></div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn--ghost" type="button" id="setCancel">取消</button>
       <button class="btn btn--danger-solid" type="button" id="setOk">执行 SET</button>
@@ -278,6 +273,6 @@
   </div>
 </div>
 <div id="toast"></div>
-<script src="/static/mib-browser.js?v=2"></script>
+<script src="/static/mib-browser.js?v=3"></script>
 </body>
 </html>
