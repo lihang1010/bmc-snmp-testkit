@@ -550,6 +550,34 @@
     return best ? best.name + (oid.length > bestLen ? oid.slice(bestLen) : '') : oid;
   }
 
+  function nodeForOid(oid){
+    var target = String(oid || '').replace(/^\./, '');
+    if(!target) return null;
+    if(allOidMap[target]) return allOidMap[target];
+    var best = null, bestLen = -1;
+    Object.keys(allOidMap).forEach(function(p){
+      if(target.indexOf(p + '.') === 0 && p.length > bestLen){ bestLen = p.length; best = allOidMap[p]; }
+    });
+    return best;
+  }
+
+  function writableNode(oid){
+    var node = nodeForOid(oid);
+    if(!node){
+      toast('当前 MIB 中找不到 '+oid+'，无法确认是否可写', true);
+      return null;
+    }
+    if(node.kind !== 'scalar' && node.kind !== 'column'){
+      toast('「'+node.name+'」是结构节点，请在具体的标量或列上执行 SET', true);
+      return null;
+    }
+    if(node.access !== 'read-write' && node.access !== 'write-only'){
+      toast('「'+node.name+'」不可写（'+(node.access || '未知权限')+'）', true);
+      return null;
+    }
+    return node;
+  }
+
   function formatValue(vb, colOid){
     var val = vb.value;
     var syn = colOid ? colSyntax[colOid] : null;
@@ -702,8 +730,21 @@
   function openSetDialog(oid){
     if(!oid){ toast('请先选择节点或填写 OID', true); return; }
     if($('setBtn').disabled){ toast('服务策略已禁用 live SET', true); return; }
+    var node = writableNode(oid);
+    if(!node) return;
+    if(node.kind === 'column' && oid === node.oid){
+      toast('请选择具体实例行（列 OID 需带行索引）再执行 SET', true);
+      return;
+    }
+    if(node.kind === 'scalar' && !/\.\d+$/.test(oid)) oid = oid + '.0';
     pendingSetOid = oid;
     $('oid').value = oid;
+    var base = node.syntax && node.syntax.base_type;
+    var preferred = {
+      Integer32: 'Integer32', INTEGER: 'Integer32', IpAddress: 'IpAddress',
+      'OBJECT IDENTIFIER': 'ObjectIdentifier', TimeTicks: 'TimeTicks',
+    }[base] || 'OctetString';
+    $('setAsn1').value = preferred;
     var target = ($('host').value.trim() || '(未填目标)') + ':' + ($('port').value || '161');
     $('setText').textContent = '将向 ' + target + ' 写入 ' + oid + ' = ' +
       ($('setValue').value || '(空)') + '（' + $('setAsn1').value + '）。' +
