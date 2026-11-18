@@ -326,8 +326,8 @@
           <div class="user-panel-label">当前账号</div>
           <div id="userEmail" class="user-panel-email">—</div>
         </div>
-        <a id="mailSettingsLink" class="btn btn--ghost btn--sm user-panel-test" href="/mail-settings">邮件设置</a>
-        <button id="mailTestBtn" class="btn btn--ghost btn--sm user-panel-test">发送测试邮件</button>
+        <a id="mailSettingsLink" class="btn btn--ghost btn--sm user-panel-test hidden" href="/mail-settings">邮件设置</a>
+        <button id="mailTestBtn" class="btn btn--ghost btn--sm user-panel-test hidden">发送测试邮件</button>
         <button id="logoutBtn" class="btn btn--ghost btn--sm user-panel-logout">退出登录</button>
       </div>
     </div>
@@ -972,6 +972,9 @@
           '<span class="cap-item">队列 <b>'+esc(c.queue_length)+'</b></span>'+
           '<span class="cap-item">MIB <b>'+esc(c.mib_count)+'</b></span>'+
           '<span class="cap-item">任务 <b>'+esc(c.job_count)+'</b></span>';
+        var mailAdmin = !!c.mail_admin;
+        $('mailSettingsLink').classList.toggle('hidden', !mailAdmin);
+        $('mailTestBtn').classList.toggle('hidden', !mailAdmin);
       }).catch(function(){}),
       api('/api/mibs', options).then(function(d){
         if(!d.mibs.length){ $('mibBody').innerHTML='<tr><td colspan="5" class="muted">暂无 MIB，请先上传</td></tr>'; return; }

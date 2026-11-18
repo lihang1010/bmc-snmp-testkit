@@ -327,7 +327,7 @@ python -c "import json;a=json.load(open('runs/verify-a/results.json',encoding='u
 | 新增 | 作用 |
 | --- | --- |
 | `src/snmp_test/security.py` | **把 live 闸口从 CLI 下沉到 `Runtime`**：`SecurityPolicy.enforce()` 校验 `allow_live` 与 `allowed_targets`；`readonly_only` 强制 `enable_set=False` 并拒绝非只读操作（只约束 CLI / Python 调用） |
-| `src/snmp_test/service/auth.py` | 邮箱账号：注册 / 密码登录 / 验证码登录 / 忘记密码重置；密码连续错误 5 次锁定 5 分钟；SQLite（`work/auth.db`）存用户、验证码、会话与失败计数，PBKDF2-HMAC-SHA256 加盐，服务端随机 token + HttpOnly Cookie；SMTP 读取 `config/web.yaml` 的 `mail` 段（环境变量优先） |
+| `src/snmp_test/service/auth.py` | 邮箱账号：注册 / 密码登录 / 验证码登录 / 忘记密码重置；密码连续错误 5 次锁定 5 分钟；SQLite（`work/auth.db`）存用户、验证码、会话与失败计数，PBKDF2-HMAC-SHA256 加盐，服务端随机 token + HttpOnly Cookie；SMTP 读取 `config/web.yaml` 的 `mail` 段（环境变量优先）；仅 `admin_emails`（默认 lihang@ttyinfo.com）可访问邮件设置 |
 | `src/snmp_test/service/web_policy.py` | 交互探测与任务提交共用的 `security.web` 策略：`allow_live` / `allowed_targets` / `readonly_only` / `live_set_enabled` / `hard_block_enabled`；拒绝写审计 |
 | `src/snmp_test/service/mibs.py` | 按内容 SHA-256 分目录 `work/mibs/<id>/`，每个 MIB 存原文件 + `model.json` + `cases.json` + `parse-warnings.json` + `meta.json` |
 | `src/snmp_test/model/mib_compiler.py` + `model/mib_deps/` | 通用 MIB 导入：pysmi 只做 `IMPORTS` / 严格语法检查；离线标准符号表补齐外部父 OID 与文本约定 |
@@ -376,7 +376,7 @@ GET /runs/{run_id}/report.html -> 带鉴权的静态报告
 
 ### 11.4 已验证与仍是 MVP 的部分
 
-已验证（全量 `pytest` 共 218 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
+已验证（全量 `pytest` 共 219 项，含 `tests/test_service_security.py`、`tests/test_web_api.py`）：API 无法绕过 live 确认、策略拒绝与硬阻断写审计、只读批量任务、两份不同 MIB 的 `case_id` 集合完全不重叠、同内容 MIB 去重、凭据不落盘、`pdus.jsonl` 只有只读 PDU、报告需鉴权、标准 SMIv2 MIB 导入无丢节点、真实 uvicorn 进程 `/health` 与首页可访问。
 
 仍是 MVP、生产前需替换：
 

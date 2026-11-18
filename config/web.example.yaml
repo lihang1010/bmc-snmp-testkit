@@ -11,6 +11,11 @@
 #   SNMP_TEST_SMTP_HOST / SNMP_TEST_SMTP_PORT / SNMP_TEST_SMTP_USER
 #   SNMP_TEST_SMTP_PASSWORD / SNMP_TEST_SMTP_FROM / SNMP_TEST_SMTP_TLS / SNMP_TEST_SMTP_SSL
 
+# 仅以下邮箱可访问「邮件设置」页面、修改 SMTP 与发送测试邮件。
+# 省略时默认仅 lihang@ttyinfo.com 可访问。
+admin_emails:
+  - lihang@ttyinfo.com
+
 # 内网部署：live 目标默认可达，不设 allow_live / 白名单等前置门槛。
 # 所有交互式 SNMP 操作（含 SET 值）写入 work/probe-audit.jsonl，按账号溯源；
 # 凭据不写入审计日志。批量任务仍只跑只读 GET。

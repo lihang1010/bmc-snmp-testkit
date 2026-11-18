@@ -42,6 +42,7 @@ VERSIONS = ("v1", "v2c", "v3")
 MAX_LIMIT = 500
 
 ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_MAIL_ADMINS = ("lihang@ttyinfo.com",)
 
 
 class JobRequest(BaseModel):
@@ -118,6 +119,20 @@ def _mail_settings(config_path: Path) -> dict[str, Any]:
     return dict(raw.get("mail") or {})
 
 
+def _mail_admins(config_path: Path) -> tuple[str, ...]:
+    """Accounts allowed to view/change mail settings (defaults to one admin)."""
+    if not config_path.is_file():
+        return DEFAULT_MAIL_ADMINS
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return DEFAULT_MAIL_ADMINS
+    values = raw.get("admin_emails")
+    if values is None:
+        return DEFAULT_MAIL_ADMINS
+    return tuple(str(v).strip().lower() for v in values if str(v).strip())
+
+
 def _read_yaml(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
@@ -164,6 +179,7 @@ def create_app(
     workspace = Path(root) if root else ROOT
     cfg_path = Path(config_path) if config_path else workspace / "config" / "web.yaml"
     security_cfg = _web_security(cfg_path)
+    mail_admins = _mail_admins(cfg_path)
     auth = AuthService(
         workspace / "work" / "auth.db",
         mail_settings=_load_mail_config(workspace, cfg_path),
@@ -212,6 +228,12 @@ def create_app(
             raise HTTPException(401, "未登录：请先登录")
         if not user.can(action):
             raise HTTPException(403, f"当前账号无权执行该操作（需要 {action}）")
+        return user
+
+    def require_mail_admin(request: Request) -> User:
+        user = require(request)
+        if user.email.strip().lower() not in mail_admins:
+            raise HTTPException(403, "仅指定账号可访问邮件设置")
         return user
 
     def find_run(run_id: str, user: User):
@@ -284,7 +306,7 @@ def create_app(
 
     @app.post("/api/mail/test")
     async def mail_test(request: Request):
-        user = require(request)
+        user = require_mail_admin(request)
         try:
             auth.mailer.send_test(user.email)
         except AuthError as exc:
@@ -307,12 +329,12 @@ def create_app(
 
     @app.get("/api/mail/settings")
     async def get_mail_settings(request: Request):
-        require(request)
+        require_mail_admin(request)
         return mail_status()
 
     @app.put("/api/mail/settings")
     async def put_mail_settings(payload: MailSettingsRequest, request: Request):
-        require(request, "write")
+        require_mail_admin(request)
         if not (1 <= payload.port <= 65535):
             raise HTTPException(400, "端口必须在 1–65535 之间")
         updates = {
@@ -363,6 +385,7 @@ def create_app(
             "workers": runner.workers,
             "mib_count": len(library.list()),
             "job_count": len(store.list_for(user.email, 500)),
+            "mail_admin": user.email.strip().lower() in mail_admins,
         }
 
     # ------------------------------------------------------------- mibs
@@ -758,8 +781,13 @@ def create_app(
 
     @app.get("/mail-settings", response_class=HTMLResponse)
     async def mail_settings_page(request: Request):
-        if auth.authenticate(_token(request)) is None:
+        user = auth.authenticate(_token(request))
+        if user is None:
             return RedirectResponse("/login", status_code=302)
+        if user.email.strip().lower() not in mail_admins:
+            return HTMLResponse(
+                "<h1>403</h1><p>仅指定账号可访问邮件设置。</p>", status_code=403
+            )
         return templates.TemplateResponse(
             request, "mail_settings.html", {"title": "邮件设置 · bmc-snmp-testkit"}
         )

@@ -25,7 +25,7 @@ BOB = "bob@example.com"
 PASSWORD = "test-password-123"
 
 
-def _web_yaml(allow_live: bool = False, allowed: str = "") -> str:
+def _web_yaml(allow_live: bool = False, allowed: str = "", admin_email: str = ALICE) -> str:
     lines = [
         "security:",
         f"  allow_live: {'true' if allow_live else 'false'}",
@@ -33,13 +33,18 @@ def _web_yaml(allow_live: bool = False, allowed: str = "") -> str:
     ]
     if allowed:
         lines.append(f"    - {allowed}")
+    if admin_email:
+        lines.extend(["admin_emails:", f"  - {admin_email}"])
     return "\n".join(lines) + "\n"
 
 
 _APP_COUNTER = 0
 
 
-def _make_app(root: Path, allow_live: bool = False, allowed: str = "", clear_bypass: bool = True):
+def _make_app(
+    root: Path, allow_live: bool = False, allowed: str = "", clear_bypass: bool = True,
+    admin_email: str = ALICE,
+):
     global _APP_COUNTER
     _APP_COUNTER += 1
     # Give each test app its own probe ports so pytest never collides with a
@@ -49,7 +54,9 @@ def _make_app(root: Path, allow_live: bool = False, allowed: str = "", clear_byp
     if clear_bypass:
         os.environ.pop("SNMP_TEST_DEV_BYPASS", None)
     (root / "config").mkdir(parents=True, exist_ok=True)
-    (root / "config" / "web.yaml").write_text(_web_yaml(allow_live, allowed), encoding="utf-8")
+    (root / "config" / "web.yaml").write_text(
+        _web_yaml(allow_live, allowed, admin_email), encoding="utf-8"
+    )
     shutil.copy(ROOT / "config" / "safety-policy.yaml", root / "config" / "safety-policy.yaml")
     return create_app(root=root, config_path=root / "config" / "web.yaml")
 
@@ -210,6 +217,19 @@ def test_mail_test_endpoint(web, monkeypatch):
     assert sent == [ALICE]
 
 
+def test_mail_settings_admin_only(web):
+    client, _, _, alice, bob = web
+    assert client.get("/api/config", headers=_headers(alice)).json()["mail_admin"] is True
+    assert client.get("/api/config", headers=_headers(bob)).json()["mail_admin"] is False
+    assert client.get("/mail-settings", headers=_headers(bob)).status_code == 403
+    assert client.get("/api/mail/settings", headers=_headers(bob)).status_code == 403
+    assert client.put(
+        "/api/mail/settings", headers=_headers(bob),
+        json={"host": "smtp.bad", "port": 587},
+    ).status_code == 403
+    assert client.post("/api/mail/test", headers=_headers(bob)).status_code == 403
+
+
 def test_mail_settings_page_and_api(tmp_path, monkeypatch):
     for name in (
         "SNMP_TEST_SMTP_HOST", "SNMP_TEST_SMTP_PORT", "SNMP_TEST_SMTP_USER",
@@ -218,7 +238,7 @@ def test_mail_settings_page_and_api(tmp_path, monkeypatch):
     ):
         monkeypatch.delenv(name, raising=False)
     root = tmp_path / "mailcfg"
-    app = _make_app(root)
+    app = _make_app(root, admin_email="mailcfg@example.com")
     email = "mailcfg@example.com"
     with TestClient(app) as client:
         alice = _register(client, email)
