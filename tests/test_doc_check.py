@@ -85,20 +85,26 @@ def test_parse_compare_and_fix_docx(tmp_path: Path):
     fixed_model = build_model(fixed_mib)
     assert fixed_model.node_by_name("testIfDescr").syntax.base_type == "Integer32"
 
-    missing = details["mib_only_oids"]
-    supplement = tmp_path / "supplement.docx"
-    assert append_missing_docx(source, supplement, model, missing) == len(missing)
-    supplement_doc = Document(supplement)
-    assert any("附录" in p.text for p in supplement_doc.paragraphs)
-
     fixed = tmp_path / "fixed.docx"
     assert apply_fixes(source, fixed, parsed, findings) == 2
     approved = {row.oid: row for row in parse_docx(fixed)}
     assert approved["1.3.6.1.2.1.999.1.1.1.2"].dtype == "DisplayString"
     assert approved["1.3.6.1.2.1.999.1.1.1.3"].dtype == "Integer32"
     assert approved["1.3.6.1.2.1.999.1.1.1.3"].access == "详见{备注1}"
-    assert approved["1.3.6.1.2.1.999.1.1.1.3"].access == "详见{备注1}"
     assert approved["1.3.6.1.2.1.999.1.1.1.4"].name == "testIfOpStatus"
+
+    fixed_doc = Document(fixed)
+    assert any("本次自动修正记录" in p.text for p in fixed_doc.paragraphs)
+    assert len(fixed_doc.tables) == len(Document(source).tables) + 1
+    assert "updateFields" in fixed_doc.settings.element.xml
+
+    missing = details["mib_only_oids"]
+    supplement = tmp_path / "supplement.docx"
+    assert append_missing_docx(source, supplement, model, missing) == len(missing)
+    supplement_doc = Document(supplement)
+    assert any("附录" in p.text for p in supplement_doc.paragraphs)
+    assert any("本次文档补充记录" in p.text for p in supplement_doc.paragraphs)
+    assert "updateFields" in supplement_doc.settings.element.xml
 
 
 def test_parse_rejects_document_without_interface_tables(tmp_path: Path):

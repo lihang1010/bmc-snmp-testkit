@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 from snmp_test.model.mib_model import build_model
 from snmp_test.model.types import MibModel
@@ -272,6 +274,83 @@ def _rewrite_cell(cell: Any, value: str) -> None:
         run.text = ""
 
 
+def _revision_anchor(document: Any) -> Any | None:
+    for table in document.tables[:5]:
+        if not table.rows:
+            continue
+        header = " ".join(cell.text for cell in table.rows[0].cells).upper()
+        if "REVISION" in header or "版本" in header:
+            return table
+    return document.tables[0] if document.tables else None
+
+
+def _insert_record_table(document: Any, title_text: str, headers: list[str],
+                         rows: list[list[str]], note: str = "") -> None:
+    anchor = _revision_anchor(document)
+    if anchor is None:
+        return
+    title = document.add_paragraph()
+    title.add_run(title_text).bold = True
+    anchor._tbl.addnext(title._p)
+    if note:
+        note_para = document.add_paragraph(note)
+        note_para.runs[0].font.size = None
+        title._p.addnext(note_para._p)
+    table = document.add_table(rows=1, cols=len(headers))
+    try:
+        table.style = "Table Grid"
+    except Exception:
+        pass
+    for index, header in enumerate(headers):
+        cell = table.rows[0].cells[index]
+        cell.text = header
+        for run in cell.paragraphs[0].runs:
+            run.bold = True
+    for values in rows:
+        cells = table.add_row().cells
+        for index, value in enumerate(values):
+            cells[index].text = str(value or "")
+    (note_para._p if note else title._p).addnext(table._tbl)
+
+
+def _mark_fields_for_update(document: Any) -> None:
+    settings = document.settings.element
+    for old in settings.findall(qn("w:updateFields")):
+        settings.remove(old)
+    update = OxmlElement("w:updateFields")
+    update.set(qn("w:val"), "true")
+    settings.append(update)
+    for field in document.element.body.iter(qn("w:fldChar")):
+        if field.get(qn("w:fldCharType")) == "begin":
+            field.set(qn("w:dirty"), "true")
+
+
+FIELD_LABEL = {"name": "名称", "type": "数据类型", "access": "实现规格", "status": "状态", "oid": "OID"}
+
+
+def _insert_change_record(document: Any, findings: list[dict[str, Any]]) -> None:
+    if not findings:
+        return
+    rows = []
+    for finding in findings:
+        auto = finding.get("action") == "update_doc"
+        rows.append([
+            finding["oid"],
+            finding["name"],
+            FIELD_LABEL.get(finding["field"], finding["field"]),
+            finding["doc_value"],
+            finding["mib_value"],
+            "已按 MIB 修正" if auto else "需人工确认",
+        ])
+    _insert_record_table(
+        document,
+        "本次自动修正记录",
+        ["OID", "节点", "字段", "文档值", "MIB 值", "处理结果"],
+        rows,
+        "由 bmc-snmp-testkit 自动生成；原始文档未被修改。目录页码将在打开文档时更新。",
+    )
+
+
 def apply_fixes(source: str | Path, destination: str | Path, rows: list[DocRow],
                 findings: list[dict[str, Any]]) -> int:
     document = Document(str(source))
@@ -287,6 +366,8 @@ def apply_fixes(source: str | Path, destination: str | Path, rows: list[DocRow],
         table = document.tables[row.table_index]
         _rewrite_cell(table.rows[row.row_index].cells[column], str(finding["mib_value"]))
         changed += 1
+    _insert_change_record(document, findings)
+    _mark_fields_for_update(document)
     document.save(str(destination))
     return changed
 
@@ -395,18 +476,28 @@ def apply_mib_fixes(source: str | Path, destination: str | Path,
 def append_missing_docx(source: str | Path, destination: str | Path,
                         model: MibModel, missing_oids: list[str]) -> int:
     document = Document(str(source))
+    by_oid = {n.oid: n for n in model.nodes if n.kind in ("scalar", "column")}
+    groups: dict[str, list[Any]] = {}
+    for oid in missing_oids:
+        node = by_oid.get(oid)
+        if node is not None:
+            table_name = node.table_name or "标量（scalar）"
+            groups.setdefault(table_name, []).append(node)
+    _insert_record_table(
+        document,
+        "本次文档补充记录",
+        ["表 / 分组", "新增节点数"],
+        [[name, str(len(nodes))] for name, nodes in sorted(groups.items())],
+        f"由 bmc-snmp-testkit 根据 MIB 自动补充，共 {len(missing_oids)} 个节点；"
+        "目录页码将在打开文档时更新。",
+    )
+    _mark_fields_for_update(document)
     document.add_page_break()
     document.add_heading("附录：MIB 中未在本文档列出的节点", level=1)
     document.add_paragraph(
         "以下内容由测试框架根据 MIB 自动生成，用于补齐文档未逐行列出的节点；"
         "“含义”取自 MIB DESCRIPTION，可能为空。"
     )
-    by_oid = {n.oid: n for n in model.nodes if n.kind in ("scalar", "column")}
-    groups: dict[str, list[Any]] = {}
-    for oid in missing_oids:
-        node = by_oid.get(oid)
-        if node is not None:
-            groups.setdefault(node.table_name or "标量（scalar）", []).append(node)
     added = 0
     for table_name, nodes in sorted(groups.items()):
         document.add_heading(f"{table_name}（{len(nodes)} 个节点）", level=2)
