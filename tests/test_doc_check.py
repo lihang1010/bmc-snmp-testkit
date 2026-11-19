@@ -8,11 +8,15 @@ from snmp_test.model.mib_model import build_model
 from snmp_test.model.types import MibModel, MibNode, SyntaxSpec
 from snmp_test.service.doc_check import (
     DocRow,
+    append_missing_docx,
     apply_fixes,
+    apply_mib_fixes,
+    build_changes,
     compare_rows,
     extract_notes,
     parse_docx,
 )
+import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "TEST-IF-MIB.mib"
@@ -68,6 +72,24 @@ def test_parse_compare_and_fix_docx(tmp_path: Path):
         f for f in findings if f["field"] == "access" and f["oid"].endswith(".1.3")
     )
     assert access_note["note"] == "备注1：只有 web 服务该项具有 read-write 属性。"
+    changes = build_changes(findings)
+    assert any(c["target"] == "docx" for c in changes)
+    assert any(c["target"] == "mib" for c in changes)
+    assert any(c["target"] == "manual" for c in changes)
+
+    mib_copy = tmp_path / "source.mib"
+    shutil.copy(FIXTURE, mib_copy)
+    fixed_mib = tmp_path / "fixed.mib"
+    diff, changed = apply_mib_fixes(mib_copy, fixed_mib, findings)
+    assert changed == 2 and "SYNTAX" in diff
+    fixed_model = build_model(fixed_mib)
+    assert fixed_model.node_by_name("testIfDescr").syntax.base_type == "Integer32"
+
+    missing = details["mib_only_oids"]
+    supplement = tmp_path / "supplement.docx"
+    assert append_missing_docx(source, supplement, model, missing) == len(missing)
+    supplement_doc = Document(supplement)
+    assert any("附录" in p.text for p in supplement_doc.paragraphs)
 
     fixed = tmp_path / "fixed.docx"
     assert apply_fixes(source, fixed, parsed, findings) == 2

@@ -190,7 +190,7 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 
 主页面「提交只读任务」与探测面板同样固定 `live` 直连真实 BMC，目标 IP 必填；Web 界面不再提供「本地自测」开关。选择 MIB 后，「模块」下拉框会列出该 MIB 解析出的顶层模块（例如 `serverAssetInfo`、`serverStatus`），选中后执行该子树下的全部 GET / GETNEXT / GETBULK 用例；未选择模块时执行整份 MIB。模拟 Agent 仅供 CLI `snmp-test run` / `mock-agent` 与 pytest 离线回归使用——它验证解析 / 生成 / 断言 / SNMP 适配层，**不能证明真机兼容性**。
 
-**文档一致性检查**（`/doc-check`）：上传标准五列表格的 DOCX 接口说明（节点 / 数据类型 / 含义 / 实现规格 / 状态）并选择对应 MIB，按 OID 比对名称、类型、access 与状态。结果区分「可自动修正」和「需人工确认」，可下载修正版 DOCX（只改类型/权限/状态，原文件不动、尽量保留格式）；MIB 比文档多出的节点会区分「与已文档化表结构相同的同构表省略」和「真正未覆盖」，后者作为文档缺口提示。PDF 需先转成 DOCX 或文本再检查。
+**文档一致性检查**（`/doc-check`）：上传标准五列表格的 DOCX 接口说明（节点 / 数据类型 / 含义 / 实现规格 / 状态）并选择对应 MIB，按 OID 比对名称、类型、access 与状态。结果区分「可自动修正」和「需人工确认」，并生成三类候选文件：按 MIB 修正的 DOCX、按文档修正的 MIB（附 unified diff）、补充缺失节点的 DOCX 附录。原文件均不动；MIB 修正版会重新解析校验，DOCX 修正尽量保留格式。MIB 比文档多出的节点会区分「与已文档化表结构相同的同构表省略」和「真正未覆盖」，后者作为文档缺口提示。PDF 需先转成 DOCX 或文本再检查。
 
 **内网信任模型与审计**：
 
@@ -226,6 +226,7 @@ python -m snmp_test.service.app --host 0.0.0.0 --port 8080
 | GET | `/api/mibs/{id}/modules` | MIB 解析出的顶层模块（任务提交页下拉框），含模块根 OID 与节点数 |
 | POST | `/api/doc-check` | 上传 DOCX + `X-MIB-ID`，按 OID 与 MIB 比对 |
 | GET | `/api/doc-check/{id}` / `/api/doc-check/{id}/fixed.docx` | 检查报告 / 下载修正版 DOCX |
+| GET | `/api/doc-check/{id}/fixed.mib` / `/api/doc-check/{id}/supplement.docx` | 按文档修正的 MIB / 补充节点附录 DOCX |
 | GET | `/doc-check` | 文档一致性检查页面 |
 | GET | `/api/mibs/{id}/tree` | 一次返回整棵节点树（MIB 浏览器使用），含父子关系、表列与语法 |
 | GET | `/api/mibs/{id}/warnings` | 解析告警、`IMPORTS` 依赖与 SMIv2 严格语法检查结果 |

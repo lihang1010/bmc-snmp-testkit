@@ -59,6 +59,9 @@
     background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);
     box-shadow:0 20px 48px rgba(15,23,42,.22)}
   #toast.bad{border-left-color:var(--fail);color:#b91c1c}
+  pre{margin:8px 0 0;padding:10px;border-radius:8px;background:#0f172a;color:#e2e8f0;
+    font-size:11px;line-height:1.5;overflow:auto;max-height:320px}
+  details summary{cursor:pointer;color:var(--accent);font-size:12px;margin-top:10px}
   @media(max-width:900px){.cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
   @media(max-width:640px){.grid{grid-template-columns:1fr}.field.span2{grid-column:auto}
     .cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -98,8 +101,13 @@
     <div class="note hidden" id="resultNote"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 10px">
       <div class="sub" id="resultMeta"></div>
-      <a class="btn hidden" id="downloadFixed" href="#">下载修正版 DOCX</a>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a class="btn hidden" id="downloadFixed" href="#">按 MIB 修正文档 DOCX</a>
+        <a class="btn hidden" id="downloadMib" href="#">按文档修正 MIB</a>
+        <a class="btn hidden" id="downloadSupplement" href="#">补充缺失节点 DOCX</a>
+      </div>
     </div>
+    <details id="diffBox" class="hidden"><summary>查看 MIB 修改 diff</summary><pre id="mibDiff"></pre></details>
     <div style="overflow-x:auto">
       <table>
         <thead><tr><th>类型</th><th>OID / 节点</th><th>文档值</th><th>MIB 值</th><th>处理</th></tr></thead>
@@ -152,15 +160,21 @@
       note.className = 'note ok'; note.textContent = '未发现文档与 MIB 的差异。';
     } else {
       note.className = 'note';
-      note.textContent = '类型/权限/状态差异会写入“修正版 DOCX”；名称与 OID 差异仅提示，需人工确认。';
+      note.textContent = '已生成三类候选：按 MIB 修正文档、按文档修正 MIB（附 diff）、补充缺失节点附录；名称与 OID 差异仅提示，需人工确认。';
     }
+    var changeMap = {};
+    (report.changes || []).forEach(function(c){ changeMap[c.oid + '|' + c.field + '|' + c.target] = c; });
     $('findingBody').innerHTML = report.findings.map(function(f){
+      var lines = [];
+      if(changeMap[f.oid + '|' + f.field + '|docx']) lines.push('改文档 → ' + f.mib_value);
+      if(changeMap[f.oid + '|' + f.field + '|mib']) lines.push('改 MIB → ' + f.doc_value);
+      var actionText = lines.length ? lines.join('<br>') : '需人工判断';
       return '<tr><td><span class="status '+(f.action==='update_doc'?'auto':'manual')+'">'+
         (f.action==='update_doc'?'自动修正':'人工确认')+'</span> '+(FIELD_LABEL[f.field]||esc(f.field))+'</td>'+
         '<td><code>'+esc(f.oid)+'</code><br><span class="sub">'+esc(f.name)+'</span></td>'+
         '<td>'+esc(f.doc_value)+(f.note?'<div class="hint" style="margin-top:4px">'+esc(f.note)+'</div>':'')+'</td>'+
         '<td>'+esc(f.mib_value)+'</td>'+
-        '<td class="hint">'+(f.action==='update_doc'?'改文档':'需人工判断')+'</td></tr>';
+        '<td class="hint">'+actionText+'</td></tr>';
     }).join('') || '<tr><td colspan="5" class="hint">无差异</td></tr>';
     var dl = $('downloadFixed');
     if(report.fixed_available){
@@ -168,6 +182,28 @@
       dl.href = '/api/doc-check/' + report.check_id + '/fixed.docx';
     } else {
       dl.classList.add('hidden'); dl.removeAttribute('href');
+    }
+    var dm = $('downloadMib');
+    if(report.fixed_mib_available){
+      dm.classList.remove('hidden');
+      dm.href = '/api/doc-check/' + report.check_id + '/fixed.mib';
+    } else {
+      dm.classList.add('hidden'); dm.removeAttribute('href');
+    }
+    var ds = $('downloadSupplement');
+    if(report.supplement_available){
+      ds.classList.remove('hidden');
+      ds.href = '/api/doc-check/' + report.check_id + '/supplement.docx';
+      ds.textContent = '补充缺失节点 DOCX（' + report.supplement_count + '）';
+    } else {
+      ds.classList.add('hidden'); ds.removeAttribute('href');
+    }
+    var diffBox = $('diffBox');
+    if(report.mib_diff){
+      diffBox.classList.remove('hidden');
+      $('mibDiff').textContent = report.mib_diff;
+    } else {
+      diffBox.classList.add('hidden'); $('mibDiff').textContent = '';
     }
     var mibOnly = s.mib_only || 0;
     var templateCovered = s.mib_only_template || 0;

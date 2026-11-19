@@ -165,6 +165,10 @@ def test_doc_check_web_flow(web):
     assert report["summary"]["doc_rows"] == 2
     assert report["summary"]["type_mismatch"] == 1
     assert report["fixed_available"] is True
+    assert report["fixed_mib_available"] is True
+    assert report["supplement_available"] is True
+    assert any(c["target"] == "docx" for c in report["changes"])
+    assert any(c["target"] == "mib" for c in report["changes"])
     check_id = report["check_id"]
 
     assert client.get(f"/api/doc-check/{check_id}", headers=_headers(alice)).status_code == 200
@@ -174,8 +178,16 @@ def test_doc_check_web_flow(web):
     fixed_doc = Document(BytesIO(fixed.content))
     assert fixed_doc.tables[0].rows[2].cells[1].text == "DisplayString"
 
+    fixed_mib = client.get(f"/api/doc-check/{check_id}/fixed.mib", headers=_headers(alice))
+    assert fixed_mib.status_code == 200 and b"TEST-IF-MIB" in fixed_mib.content
+    supplement = client.get(
+        f"/api/doc-check/{check_id}/supplement.docx", headers=_headers(alice),
+    )
+    assert supplement.status_code == 200 and supplement.content.startswith(b"PK")
+
     page = client.get("/doc-check", headers=_headers(alice)).text
-    for marker in ('id="checkFile"', 'id="checkMib"', 'id="downloadFixed"'):
+    for marker in ('id="checkFile"', 'id="checkMib"', 'id="downloadFixed"',
+                   'id="downloadMib"', 'id="downloadSupplement"', 'id="diffBox"'):
         assert marker in page, marker
     assert client.get("/doc-check", headers=_headers(alice)).status_code == 200
     with _no_cookie(client):

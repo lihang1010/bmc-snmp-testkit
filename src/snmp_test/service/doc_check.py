@@ -7,6 +7,7 @@ copy that only rewrites machine-checkable fields (type/access/status).
 
 from __future__ import annotations
 
+import difflib
 import json
 import re
 import shutil
@@ -19,6 +20,7 @@ from typing import Any
 
 from docx import Document
 
+from snmp_test.model.mib_model import build_model
 from snmp_test.model.types import MibModel
 from snmp_test.service.mibs import MibError, MibLibrary
 
@@ -44,6 +46,12 @@ _TYPE_ALIASES = {
     "BITS": "OCTETSTRING",
 }
 ACCESS_VALUES = {"read-only", "read-write", "write-only", "not-accessible", "accessible-for-notify"}
+MIB_TYPE_NAMES = {
+    "INTEGER32": "Integer32", "INTEGER": "INTEGER", "DISPLAYSTRING": "DisplayString",
+    "OCTETSTRING": "OCTET STRING", "IPADDRESS": "IpAddress", "TIMETICKS": "TimeTicks",
+    "GAUGE32": "Gauge32", "UNSIGNED32": "Unsigned32", "COUNTER32": "Counter32",
+    "COUNTER64": "Counter64", "OBJECTIDENTIFIER": "OBJECT IDENTIFIER",
+}
 
 
 class DocCheckError(ValueError):
@@ -136,7 +144,8 @@ def extract_notes(path: str | Path) -> dict[str, str]:
 
 
 def _finding(row: DocRow, field: str, doc_value: Any, mib_value: Any, *,
-             action: str, severity: str, note: str = "") -> dict[str, Any]:
+             action: str, severity: str, note: str = "",
+             mib_line: int = 0) -> dict[str, Any]:
     result = {
         "oid": row.oid,
         "name": row.name,
@@ -147,6 +156,7 @@ def _finding(row: DocRow, field: str, doc_value: Any, mib_value: Any, *,
         "severity": severity,
         "table_index": row.table_index,
         "row_index": row.row_index,
+        "mib_line": mib_line,
     }
     if note:
         result["note"] = note
@@ -173,12 +183,14 @@ def compare_rows(
             continue
         if row.name != node.name:
             findings.append(_finding(
-                row, "name", row.name, node.name, action="manual", severity="warning",
+                row, "name", row.name, node.name,
+                action="manual", severity="warning", mib_line=node.source_line,
             ))
         mib_type = node.syntax.base_type if node.syntax else ""
         if _norm_type(row.dtype) != _norm_type(mib_type):
             findings.append(_finding(
-                row, "type", row.dtype, mib_type, action="update_doc", severity="error",
+                row, "type", row.dtype, mib_type,
+                action="update_doc", severity="error", mib_line=node.source_line,
             ))
         if row.access.lower() not in ACCESS_VALUES:
             refs = NOTE_REF_RE.findall(row.access)
@@ -187,15 +199,17 @@ def compare_rows(
             )
             findings.append(_finding(
                 row, "access", row.access, node.access,
-                action="manual", severity="warning", note=note,
+                action="manual", severity="warning", note=note, mib_line=node.source_line,
             ))
         elif row.access.lower() != node.access:
             findings.append(_finding(
-                row, "access", row.access, node.access, action="update_doc", severity="warning",
+                row, "access", row.access, node.access,
+                action="update_doc", severity="warning", mib_line=node.source_line,
             ))
         if row.status.lower() != node.status:
             findings.append(_finding(
-                row, "status", row.status, node.status, action="update_doc", severity="warning",
+                row, "status", row.status, node.status,
+                action="update_doc", severity="warning", mib_line=node.source_line,
             ))
     mib_only = sorted(set(nodes) - seen)
     documented_tables = {
@@ -241,6 +255,7 @@ def compare_rows(
     return findings, {
         "summary": summary,
         "mib_only_sample": mib_only[:20],
+        "mib_only_oids": mib_only,
         "mib_only_groups": groups[:30],
     }
 
@@ -274,6 +289,148 @@ def apply_fixes(source: str | Path, destination: str | Path, rows: list[DocRow],
         changed += 1
     document.save(str(destination))
     return changed
+
+
+def _mib_type_name(value: Any) -> str:
+    key = re.sub(r"\s+", "", str(value or "").upper())
+    return MIB_TYPE_NAMES.get(key, "")
+
+
+def build_changes(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
+    for finding in findings:
+        base = {
+            "oid": finding["oid"],
+            "name": finding["name"],
+            "field": finding["field"],
+            "mib_line": finding.get("mib_line", 0),
+        }
+        if finding.get("action") != "update_doc":
+            changes.append({**base, "target": "manual", "old": finding["doc_value"],
+                            "new": finding["mib_value"], "confidence": "manual"})
+            continue
+        changes.append({**base, "target": "docx", "old": finding["mib_value"],
+                        "new": finding["doc_value"], "confidence": "high"})
+        field = finding["field"]
+        doc_value = finding["doc_value"]
+        valid = (
+            (field == "type" and bool(_mib_type_name(doc_value)))
+            or (field == "access" and str(doc_value).lower() in ACCESS_VALUES)
+            or (field == "status" and str(doc_value).lower() in ("current", "deprecated", "obsolete"))
+        )
+        if valid:
+            changes.append({**base, "target": "mib", "old": finding["mib_value"],
+                            "new": doc_value, "confidence": "medium"})
+    return changes
+
+
+def _block_end(lines: list[str], start: int) -> int:
+    for index in range(start, min(len(lines), start + 200)):
+        if "::=" in lines[index] and "{" in lines[index]:
+            return index
+    return min(len(lines) - 1, start + 60)
+
+
+def apply_mib_fixes(source: str | Path, destination: str | Path,
+                    findings: list[dict[str, Any]]) -> tuple[str, int]:
+    source_path = Path(source)
+    original = source_path.read_text(encoding="utf-8", errors="replace")
+    lines = original.split("\n")
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for finding in findings:
+        if finding.get("action") != "update_doc" or not finding.get("mib_line"):
+            continue
+        if finding["field"] not in ("type", "access", "status"):
+            continue
+        grouped.setdefault(int(finding["mib_line"]), []).append(finding)
+
+    changed = 0
+    for line_no in sorted(grouped, reverse=True):
+        start = line_no - 1
+        if not 0 <= start < len(lines):
+            continue
+        end = _block_end(lines, start)
+        block = "\n".join(lines[start:end + 1])
+        updated = block
+        for finding in grouped[line_no]:
+            field, doc_value = finding["field"], str(finding["doc_value"])
+            if field == "type":
+                new_type = _mib_type_name(doc_value)
+                if not new_type:
+                    continue
+                pattern = re.compile(
+                    r"(?is)(\bSYNTAX\s+)(.*?)(?=\s+(?:MAX-ACCESS|ACCESS|STATUS|DESCRIPTION|INDEX)\b|::=)"
+                )
+                updated, count = pattern.subn(lambda m: m.group(1) + new_type, updated, count=1)
+            elif field == "access":
+                if doc_value.lower() not in ACCESS_VALUES:
+                    continue
+                pattern = re.compile(r"(?i)(\b(?:MAX-ACCESS|ACCESS)\s+)([A-Za-z-]+)")
+                updated, count = pattern.subn(r"\g<1>" + doc_value, updated, count=1)
+            else:
+                if doc_value.lower() not in ("current", "deprecated", "obsolete"):
+                    continue
+                pattern = re.compile(r"(?i)(\bSTATUS\s+)([A-Za-z-]+)")
+                updated, count = pattern.subn(r"\g<1>" + doc_value, updated, count=1)
+            if count:
+                changed += 1
+        if updated != block:
+            lines[start:end + 1] = updated.split("\n")
+
+    fixed = "\n".join(lines)
+    destination = Path(destination)
+    destination.write_text(fixed, encoding="utf-8")
+    try:
+        build_model(destination)
+    except Exception as exc:
+        destination.unlink(missing_ok=True)
+        raise DocCheckError(f"生成修正版 MIB 后无法重新解析：{exc}") from exc
+    diff = "".join(difflib.unified_diff(
+        original.splitlines(keepends=True), fixed.splitlines(keepends=True),
+        fromfile=source_path.name, tofile=destination.name,
+    ))
+    return diff, changed
+
+
+def append_missing_docx(source: str | Path, destination: str | Path,
+                        model: MibModel, missing_oids: list[str]) -> int:
+    document = Document(str(source))
+    document.add_page_break()
+    document.add_heading("附录：MIB 中未在本文档列出的节点", level=1)
+    document.add_paragraph(
+        "以下内容由测试框架根据 MIB 自动生成，用于补齐文档未逐行列出的节点；"
+        "“含义”取自 MIB DESCRIPTION，可能为空。"
+    )
+    by_oid = {n.oid: n for n in model.nodes if n.kind in ("scalar", "column")}
+    groups: dict[str, list[Any]] = {}
+    for oid in missing_oids:
+        node = by_oid.get(oid)
+        if node is not None:
+            groups.setdefault(node.table_name or "标量（scalar）", []).append(node)
+    added = 0
+    for table_name, nodes in sorted(groups.items()):
+        document.add_heading(f"{table_name}（{len(nodes)} 个节点）", level=2)
+        table = document.add_table(rows=1, cols=5)
+        try:
+            table.style = "Table Grid"
+        except Exception:
+            pass
+        for index, header in enumerate(HEADERS):
+            table.rows[0].cells[index].text = header
+        for node in sorted(nodes, key=lambda n: n.oid):
+            cells = table.add_row().cells
+            values = [
+                f"{node.name} OID:{node.oid}",
+                node.syntax.base_type if node.syntax else "",
+                node.description,
+                node.access,
+                node.status,
+            ]
+            for index, value in enumerate(values):
+                cells[index].text = str(value or "")
+            added += 1
+    document.save(str(destination))
+    return added
 
 
 class DocCheckService:
@@ -311,6 +468,7 @@ class DocCheckService:
             shutil.rmtree(folder, ignore_errors=True)
             raise
         findings, details = compare_rows(rows, model, extract_notes(source))
+        changes = build_changes(findings)
         fixed_name = ""
         if any(f["action"] == "update_doc" for f in findings):
             fixed = folder / "fixed.docx"
@@ -319,6 +477,29 @@ class DocCheckService:
                 fixed_name = "fixed.docx"
             except Exception as exc:
                 raise DocCheckError(f"生成修正版 DOCX 失败：{exc}") from exc
+
+        fixed_mib_name = ""
+        mib_diff = ""
+        if any(c["target"] == "mib" for c in changes):
+            try:
+                mib_diff, _ = apply_mib_fixes(
+                    self.library.mib_path(mib_id), folder / "fixed.mib", findings,
+                )
+                if mib_diff:
+                    fixed_mib_name = "fixed.mib"
+            except DocCheckError:
+                raise
+            except Exception as exc:
+                raise DocCheckError(f"生成修正版 MIB 失败：{exc}") from exc
+
+        supplement_name = ""
+        missing = details.get("mib_only_oids") or []
+        if missing:
+            try:
+                append_missing_docx(source, folder / "supplement.docx", model, missing)
+                supplement_name = "supplement.docx"
+            except Exception as exc:
+                raise DocCheckError(f"生成补充文档失败：{exc}") from exc
 
         report = {
             "check_id": check_id,
@@ -329,7 +510,12 @@ class DocCheckService:
             "created_at": time.time(),
             **details,
             "findings": findings,
+            "changes": changes,
+            "mib_diff": mib_diff,
             "fixed_available": bool(fixed_name),
+            "fixed_mib_available": bool(fixed_mib_name),
+            "supplement_available": bool(supplement_name),
+            "supplement_count": len(missing),
         }
         (folder / "report.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -351,9 +537,18 @@ class DocCheckService:
             raise DocCheckError("检查记录不存在")
         return json.loads((folder / "report.json").read_text(encoding="utf-8"))
 
-    def fixed_path(self, check_id: str, user: str) -> Path:
+    def _artifact(self, check_id: str, user: str, name: str, flag: str, label: str) -> Path:
         report = self.get(check_id, user)
-        path = self._dir(check_id) / "fixed.docx"
-        if not report.get("fixed_available") or not path.is_file():
-            raise DocCheckError("没有可下载的修正版；请先人工处理差异")
+        path = self._dir(check_id) / name
+        if not report.get(flag) or not path.is_file():
+            raise DocCheckError(f"没有可下载的{label}")
         return path
+
+    def fixed_path(self, check_id: str, user: str) -> Path:
+        return self._artifact(check_id, user, "fixed.docx", "fixed_available", "修正版 DOCX")
+
+    def fixed_mib_path(self, check_id: str, user: str) -> Path:
+        return self._artifact(check_id, user, "fixed.mib", "fixed_mib_available", "修正版 MIB")
+
+    def supplement_path(self, check_id: str, user: str) -> Path:
+        return self._artifact(check_id, user, "supplement.docx", "supplement_available", "补充文档")

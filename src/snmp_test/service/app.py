@@ -346,6 +346,28 @@ def create_app(
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
+    @app.get("/api/doc-check/{check_id}/fixed.mib")
+    async def download_doc_check_mib(check_id: str, request: Request):
+        user = require(request)
+        try:
+            path = doc_checks.fixed_mib_path(check_id, user.email)
+        except DocCheckError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return FileResponse(path, filename=f"{path.parent.name}-fixed.mib", media_type="text/plain")
+
+    @app.get("/api/doc-check/{check_id}/supplement.docx")
+    async def download_doc_check_supplement(check_id: str, request: Request):
+        user = require(request)
+        try:
+            path = doc_checks.supplement_path(check_id, user.email)
+        except DocCheckError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return FileResponse(
+            path,
+            filename=f"{path.parent.name}-supplement.docx",
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
     @app.post("/api/mail/test")
     async def mail_test(request: Request):
         user = require_mail_admin(request)
